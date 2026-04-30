@@ -9,6 +9,8 @@ const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS
 env.allowRemoteModels = false;
 env.localModelPath = LOCAL_MODEL_PATH;
 
+const PRIVACY_FILTER_WEBGPU = process.env.PRIVACY_FILTER_WEBGPU === "true";
+
 type AggregatedAnnotation = {
   entity_group: string,
   score: number,
@@ -23,10 +25,10 @@ export default function piiExtension(pi: ExtensionAPI) {
     if (!privacyPipeline) {
       privacyPipeline = await pipeline(
         "token-classification",
-        "openai/privacy-filter", {
-          device: "webgpu",
-          dtype: "q4"
-        }
+        "openai/privacy-filter",
+        PRIVACY_FILTER_WEBGPU
+          ? { device: "webgpu", dtype: "q4" }
+          : { dtype: "q4" }
       );
     }
     return privacyPipeline;
