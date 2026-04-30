@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { pipeline } from '@huggingface/transformers';
 

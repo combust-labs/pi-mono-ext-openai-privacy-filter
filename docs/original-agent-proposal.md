@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 # OpenAI Privacy Filter - Summary
 
 A bidirectional token-classification model for PII detection and masking, designed for high-throughput data sanitization.

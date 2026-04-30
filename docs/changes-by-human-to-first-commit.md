@@ -1,3 +1,5 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 ## Summary of User Modifications
 
 The current `index.ts` deviates from the original proposal in several ways:

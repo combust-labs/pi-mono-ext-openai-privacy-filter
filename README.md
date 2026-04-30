@@ -1,5 +1,7 @@
 # Privacy Filter Extension for pi
 
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
 A PII (Personally Identifiable Information) detection and masking extension for the [pi coding agent](https://github.com/mariozechner/pi-coding-agent).
 
 ## Overview
