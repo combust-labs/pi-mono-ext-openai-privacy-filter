@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { pipeline } from '@huggingface/transformers';
+import { env, pipeline } from '@huggingface/transformers';
 
-const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH
-     || "~/.cache/huggingface/hub/models--openai--privacy-filter";  // Local path
+const DEFAULT_MODELS_PATH = "~/.cache/huggingface/hub/"
+const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS_PATH;
+
+env.allowRemoteModels = false;
+env.localModelPath = LOCAL_MODEL_PATH;
 
 type AggregatedAnnotation = {
   entity_group: string,
@@ -20,7 +23,7 @@ export default function piiExtension(pi: ExtensionAPI) {
     if (!privacyPipeline) {
       privacyPipeline = await pipeline(
         "token-classification",
-        LOCAL_MODEL_PATH, {
+        "openai/privacy-filter", {
           device: "webgpu",
           dtype: "q4"
         }
