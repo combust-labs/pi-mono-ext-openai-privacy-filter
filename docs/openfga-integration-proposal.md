@@ -337,19 +337,21 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
 
   > Added: `deleteTuples()` for completeness, `getOpenFGAClient()` singleton helper, Bearer token auth support via `OPENFGA_API_TOKEN` env var.
 
-### Phase 2: Integration (`index.ts`)
+### Phase 2: Integration (`index.ts`) — ✅ DONE
 
-- [ ] Import `OpenFGAClient` from `./openfga`
-- [ ] Initialize client with env vars in extension setup (lazy init on first use)
-- [ ] In `before_agent_start` handler:
-  - [ ] After PII detection via `classifier(text)`
-  - [ ] For each detected entity, call both `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', literal: entity.word })` and `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', object: entity.entity_group })`
-  - [ ] Build `deniedCategories` set (categories where neither literal nor category check passes)
-  - [ ] Apply `maskPII()` only to entities in `deniedCategories`
-  - [ ] If OpenFGA is unreachable, default to masking all PII (fail-closed)
-- [ ] In `context` handler:
-  - [ ] Apply same OpenFGA authorization logic before masking PII in message history
-  - [ ] Only mask categories not authorized by either literal or category-level check
+- [x] Import `OpenFGAClient` from `./openfga`
+- [x] Initialize client with env vars in extension setup (lazy init on first use)
+- [x] In `before_agent_start` handler:
+  - [x] After PII detection via `classifier(text)`
+  - [x] For each detected entity, call both `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', literal: entity.word })` and `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', object: entity.entity_group })`
+  - [x] Build `deniedCategories` set (categories where neither literal nor category check passes)
+  - [x] Apply `maskPII()` only to entities in `deniedCategories`
+  - [x] If OpenFGA is unreachable, default to masking all PII (fail-closed)
+- [x] In `context` handler:
+  - [x] Apply same OpenFGA authorization logic before masking PII in message history
+  - [x] Only mask categories not authorized by either literal or category-level check
+
+  > Added: `buildDeniedCategoriesSet()` helper — groups entities by category, checks category-level first (efficient), then per-literal. Fail-closed when OpenFGA unreachable. PII alert now distinguishes MASKED vs ALLOWED per entity.
 
 ### Phase 3: Configuration & Documentation
 

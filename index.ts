@@ -3,6 +3,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { env, pipeline } from '@huggingface/transformers';
 import { Box, Text } from '@mariozechner/pi-tui';
+import { getOpenFGAClient } from './openfga';
 
 const DEFAULT_MODELS_PATH = "~/.cache/huggingface/hub/"
 const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS_PATH;
@@ -11,6 +12,7 @@ env.allowRemoteModels = false;
 env.localModelPath = LOCAL_MODEL_PATH;
 
 const PRIVACY_FILTER_WEBGPU = process.env.PRIVACY_FILTER_WEBGPU === "true";
+const MODEL_SUBJECT = process.env.PRIVACY_FILTER_MODEL_SUBJECT || "mlx-community/MiniMax-M2.7-8bit";
 
 type AggregatedAnnotation = {
   entity_group: string,
@@ -76,22 +78,40 @@ export default function piiExtension(pi: ExtensionAPI) {
 
     if (results.length === 0) return;
 
-    // Log detected PII types for transparency - send inline message
-    const piiTypes = [...new Set(results.map(e => e.entity_group))];
-    const piiLines = results.map(r =>
-      `  [${r.entity_group.toUpperCase()}] "${r.word}" (${(r.score * 100).toFixed(1)}%)`
-    );
+    // Determine which PII categories to mask based on OpenFGA authorization
+    const deniedCategories = await buildDeniedCategoriesSet(results);
+    const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
+    const piiToKeep = results.filter(r => !deniedCategories.has(r.entity_group));
+
+    // Log detected PII types for transparency — send inline message
+    // Distinguish between masked and allowed PII
+    const maskedTypes = [...new Set(piiToMask.map(e => e.entity_group))];
+    const keptTypes = [...new Set(piiToKeep.map(e => e.entity_group))];
+
+    const piiLines: string[] = [];
+    if (piiToMask.length > 0) {
+      piiLines.push(...piiToMask.map(r =>
+        `  [${r.entity_group.toUpperCase()}] "${r.word}" (${(r.score * 100).toFixed(1)}%) → MASKED`
+      ));
+    }
+    if (piiToKeep.length > 0) {
+      piiLines.push(...piiToKeep.map(r =>
+        `  [${r.entity_group.toUpperCase()}] "${r.word}" (${(r.score * 100).toFixed(1)}%) → ALLOWED`
+      ));
+    }
+
+    const allTypes = [...new Set(results.map(e => e.entity_group))];
 
     // Send inline message that appears in the chat flow
     pi.sendMessage({
       customType: "pii-alert",
-      content: JSON.stringify({ piiTypes, piiLines }),
+      content: JSON.stringify({ piiTypes: allTypes, piiLines }),
       display: true,
       triggerTurn: false,
     });
 
     // Inject sanitization instructions
-    const maskedText = maskPII(text, results);
+    const maskedText = maskPII(text, piiToMask);
     const injection =
       "\n\n[PRIVACY NOTICE] The user message may contain personally identifiable " +
       "information (PII). Be careful not to echo or log sensitive data like names, " +
@@ -116,11 +136,16 @@ export default function piiExtension(pi: ExtensionAPI) {
     for (const msg of filteredMessages) {
       if (msg.role === "user") {
         for (const content of msg.content) {
-          if (content.type === "text")  {
+          if (content.type === "text") {
             const results = await classifier(content.text,
               { aggregation_strategy: "simple" });
             if (results.length > 0) {
-              content.text = maskPII(content.text, results);
+              // Apply same OpenFGA authorization logic to context messages
+              const deniedCategories = await buildDeniedCategoriesSet(results);
+              const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
+              if (piiToMask.length > 0) {
+                content.text = maskPII(content.text, piiToMask);
+              }
             }
           }
         }
@@ -172,4 +197,85 @@ function maskPII(text: string, pii: AggregatedAnnotation[]): string {
     text = text.replaceAll(entity.word, placeholder);
   }
   return text;
+}
+
+/**
+ * Build the set of PII categories that should be masked.
+ * A category is denied (masked) when BOTH the literal-level check
+ * and the category-level check return false or throw.
+ *
+ * If OpenFGA is unreachable, ALL categories are denied (fail-closed).
+ */
+async function buildDeniedCategoriesSet(
+  results: AggregatedAnnotation[]
+): Promise<Set<string>> {
+  const deniedCategories = new Set<string>();
+
+  // Group by category to avoid redundant OpenFGA calls for same category
+  const categoryEntities = new Map<string, AggregatedAnnotation[]>();
+  for (const entity of results) {
+    if (!categoryEntities.has(entity.entity_group)) {
+      categoryEntities.set(entity.entity_group, []);
+    }
+    categoryEntities.get(entity.entity_group)!.push(entity);
+  }
+
+  const openfga = getOpenFGAClient();
+  let openfgaAvailable = true;
+
+  for (const [category, entities] of categoryEntities) {
+    let categoryAllowed = false;
+
+    // Try category-level check first (more efficient — one check covers all literals)
+    try {
+      const canViewCategory = await openfga.check({
+        subject: MODEL_SUBJECT,
+        relation: "can_view",
+        object: category,
+      });
+      if (canViewCategory) {
+        categoryAllowed = true;
+      }
+    } catch {
+      // OpenFGA unavailable — fail closed
+      openfgaAvailable = false;
+      break;
+    }
+
+    if (categoryAllowed) continue;
+
+    // Check each literal under this category individually
+    for (const entity of entities) {
+      try {
+        const canViewLiteral = await openfga.check({
+          subject: MODEL_SUBJECT,
+          relation: "can_view",
+          literal: entity.word,
+        });
+        if (canViewLiteral) {
+          categoryAllowed = true;
+          break;
+        }
+      } catch {
+        // OpenFGA unavailable — fail closed
+        openfgaAvailable = false;
+        break;
+      }
+    }
+
+    if (!categoryAllowed) {
+      deniedCategories.add(category);
+    }
+
+    if (!openfgaAvailable) break;
+  }
+
+  // Fail-closed: if OpenFGA was unreachable, mask everything
+  if (!openfgaAvailable) {
+    for (const category of categoryEntities.keys()) {
+      deniedCategories.add(category);
+    }
+  }
+
+  return deniedCategories;
 }
