@@ -11,16 +11,35 @@ Integrate **OpenFGA** (Open Fine-Grained Authorization) as a REST API-driven aut
 ```
 Subject:    mlx-community/MiniMax-M2.7-8bit  (the LLM model)
 Relation:   can_view
-Object:     privacy_category or privacy_category:literal_value
+Object:     privacy_category or privacy_category:sha256_hash_of_literal
 ```
+
+### Design Rationale
+
+- **Category** is stored as a plain string (e.g., `email`, `secret`) since it is not sensitive metadata.
+- **Specific literals** (e.g., `user@company.com`) are **never** stored in the policy engine. Instead, a SHA256 hash of the literal is used as the object identifier.
+- This prevents the authorization policy from leaking or inadvertently logging sensitive PII values.
 
 ### Example Authorization Tuples
 
 | Tuple | Meaning |
 |-------|---------|
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails |
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email:user@company.com` | Model can view this specific email |
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256:3f2e8d7c4b1a` | Model can view the specific email whose SHA256 is `3f2e8d7c4b1a` |
 | `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
+
+### SHA256 Hash Computation
+
+```typescript
+import { createHash } from 'crypto';
+
+function hashLiteral(literal: string): string {
+  return createHash('sha256').update(literal).digest('hex');
+}
+
+// Example:
+// hashLiteral("user@company.com") -> "3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e"
+```
 
 ---
 
@@ -63,33 +82,14 @@ model
 
 type model
   relations
-    define can_view: [privacy_category, privacy_category:literal]
+    define can_view: [privacy_category]
 
 type privacy_category
   relations
     define can_view: [model]
-
-type privacy_category#literal
-  relations
-    define can_view: [model]
 ```
 
-Alternatively, use a flat model without relations on `privacy_category`:
-
-```python
-model
-  schema 1.1
-
-type privacy_category
-  relations
-    define can_view: [model]
-
-type privacy_category#literal
-  relations
-    define can_view: [model]
-```
-
-In this case, the authorization check uses `model` as the subject type directly.
+> **Note**: The object portion of a tuple uses `privacy_category:<category>` for category-level checks and `privacy_category:sha256:<hash>` for specific literal checks. The SHA256 hash is stored directly in the object ID — no special relation type is needed.
 
 ---
 
@@ -100,6 +100,8 @@ In this case, the authorization check uses `model` as the subject type directly.
 ```typescript
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from 'crypto';
+
 type OpenFGAClientConfig = {
   apiUrl: string;      // e.g., "http://localhost:8080"
   storeId: string;     // e.g., "privacy-policies"
@@ -109,13 +111,32 @@ type OpenFGAClientConfig = {
 type CheckRequest = {
   subject: string;       // e.g., "mlx-community/MiniMax-M2.7-8bit"
   relation: string;      // e.g., "can_view"
-  object: string;        // e.g., "email" or "email:user@company.com"
+  object: string;        // e.g., "email" or "sha256:3f2e8d7c4b1a..."
+  literal?: string;      // e.g., "user@company.com" — if provided, object is ignored and hash is computed
 };
+
+function hashLiteral(literal: string): string {
+  // Truncated to 40 hex chars (20 bytes) for readability while maintaining collision resistance
+  return createHash('sha256').update(literal).digest('hex').substring(0, 40);
+}
 
 export class OpenFGAClient {
   constructor(private config: OpenFGAClientConfig) {}
 
   async check(request: CheckRequest): Promise<boolean> {
+    let objectId: string;
+
+    if (request.literal) {
+      // Hash the literal — never use raw value in policy engine
+      objectId = `privacy_category:sha256:${hashLiteral(request.literal)}`;
+    } else if (request.object.startsWith('sha256:')) {
+      // Already a hash
+      objectId = `privacy_category:${request.object}`;
+    } else {
+      // Category-only object
+      objectId = `privacy_category:${request.object}`;
+    }
+
     const response = await fetch(
       `${this.config.apiUrl}/stores/${this.config.storeId}/check`,
       {
@@ -125,7 +146,7 @@ export class OpenFGAClient {
           tuple_key: {
             user: `model:${request.subject}`,
             relation: request.relation,
-            object: `privacy_category:${request.object}`,
+            object: objectId,
           },
         }),
       }
@@ -139,7 +160,12 @@ export class OpenFGAClient {
     return result.allowed === true;
   }
 
-  async writeTuples(tuples: Array<{ subject: string; relation: string; object: string }>): Promise<void> {
+  async writeTuples(tuples: Array<{
+    subject: string;
+    relation: string;
+    object: string;
+    literal?: string;
+  }>): Promise<void> {
     await fetch(
       `${this.config.apiUrl}/stores/${this.config.storeId}/write`,
       {
@@ -147,11 +173,19 @@ export class OpenFGAClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           writes: {
-            tuple_keys: tuples.map(t => ({
-              user: `model:${t.subject}`,
-              relation: t.relation,
-              object: `privacy_category:${t.object}`,
-            })),
+            tuple_keys: tuples.map(t => {
+              let objectId: string;
+              if (t.literal) {
+                objectId = `privacy_category:sha256:${hashLiteral(t.literal)}`;
+              } else {
+                objectId = `privacy_category:${t.object}`;
+              }
+              return {
+                user: `model:${t.subject}`,
+                relation: t.relation,
+                object: objectId,
+              };
+            }),
           },
         }),
       }
@@ -178,17 +212,17 @@ const openfga = new OpenFGAClient({
 });
 
 // In before_agent_start handler, after PII detection:
-const allowedCategories = new Set<string>();
+const deniedCategories = new Set<string>();
 
 for (const entity of results) {
-  const category = entity.entity_group;           // e.g., "email"
-  const literal = `${category}:${entity.word}`;   // e.g., "email:user@company.com"
+  const category = entity.entity_group;    // e.g., "email"
+  const literal = entity.word;             // e.g., "user@company.com"
 
-  // Check both specific literal AND general category
+  // Check specific literal (hashed) AND general category
   const canViewLiteral = await openfga.check({
     subject: MODEL_SUBJECT,
     relation: "can_view",
-    object: literal,
+    literal,  // internally hashed before being sent to OpenFGA
   });
 
   const canViewCategory = await openfga.check({
@@ -197,14 +231,14 @@ for (const entity of results) {
     object: category,
   });
 
-  // Only mask if NOT authorized
+  // Only mask if NOT authorized by either check
   if (!canViewLiteral && !canViewCategory) {
-    allowedCategories.add(category);
+    deniedCategories.add(category);
   }
 }
 
 // Mask PII categories that are NOT authorized
-const maskedText = maskPII(text, results.filter(r => allowedCategories.has(r.entity_group)));
+const maskedText = maskPII(text, results.filter(r => deniedCategories.has(r.entity_group)));
 ```
 
 ### 3. Environment Variables
@@ -222,7 +256,7 @@ const maskedText = maskPII(text, results.filter(r => allowedCategories.has(r.ent
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/stores/{storeId}/check` | Check if model can view a category |
+| `POST` | `/stores/{storeId}/check` | Check if model can view a category or hashed literal |
 | `POST` | `/stores/{storeId}/write` | Add/remove authorization tuples |
 | `POST` | `/stores/{storeId}/read` | Read current tuples |
 | `GET` | `/stores/{storeId}` | Store info |
@@ -231,20 +265,25 @@ const maskedText = maskPII(text, results.filter(r => allowedCategories.has(r.ent
 
 ## Workflow Example
 
-### Step 1: Admin writes authorization tuples
+### Step 1: Admin writes authorization tuples (with hashed literals)
 
 ```bash
+# SHA256("admin@company.com") = 3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e
+# SHA256("user@company.com")  = 7c8b4a1f3e2d9c8b4a1f3e2d9c8b4a1f3e2d
+
 curl -X POST http://localhost:8080/stores/privacy-policies/write \
   -H "Content-Type: application/json" \
   -d '{
     "writes": {
       "tuple_keys": [
         {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:email"},
-        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:email:admin@company.com"}
+        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:sha256:3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e"}
       ]
     }
   }'
 ```
+
+> **Note**: The actual email addresses are **never** sent to or stored in OpenFGA. Only their SHA256 hashes appear in authorization tuples.
 
 ### Step 2: User sends prompt with PII
 
@@ -254,10 +293,14 @@ curl -X POST http://localhost:8080/stores/privacy-policies/write \
 
 ### Step 3: Extension queries OpenFGA for each detected PII
 
-| PII Entity | OpenFGA Check | Result |
-|------------|---------------|--------|
-| `admin@company.com` (email) | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:email:admin@company.com)` | **allowed** → not masked |
-| `user@company.com` (email) | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:email:user@company.com)` | **denied** → masked as `[EMAIL REDACTED]` |
+For each detected PII entity, the extension computes the SHA256 hash locally and queries OpenFGA:
+
+| PII Entity | SHA256 Hash (truncated) | OpenFGA Check | Result |
+|------------|-------------------------|---------------|--------|
+| `admin@company.com` (email) | `3f2e8d7c4b1a...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256:3f2e8d7c4b1a...)` | **allowed** → not masked |
+| `user@company.com` (email) | `7c8b4a1f3e2d...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256:7c8b4a1f3e2d...)` | **denied** → masked as `[EMAIL REDACTED]` |
+
+The category-level check (`privacy_category:email`) is also performed as a fallback — if the model has category-level access, any literal under that category is allowed.
 
 ### Step 4: Prompt to model after masking
 
@@ -269,7 +312,7 @@ curl -X POST http://localhost:8080/stores/privacy-policies/write \
 
 ## Implementation Order
 
-1. Create `openfga.ts` client class with REST API calls
+1. Create `openfga.ts` client class with REST API calls and SHA256 hashing
 2. Modify `index.ts` to integrate OpenFGA checks after PII detection
 3. Add environment variables to README documentation
 4. Add `docker-compose.yaml` for local OpenFGA development
@@ -277,35 +320,11 @@ curl -X POST http://localhost:8080/stores/privacy-policies/write \
 
 ---
 
-## Alternative: Direct Object Notation
-
-If using OpenFGA's object type notation with `#literal` relation:
-
-```typescript
-// Check for specific literal value
-await openfga.check({
-  subject: MODEL_SUBJECT,
-  relation: "can_view",
-  object: "email#literal:user@company.com",  // Note the #literal syntax
-});
-```
-
-This requires the model to define:
-
-```python
-type privacy_category
-  relations
-    define can_view: [model]
-    define literal(name: string): [model]
-```
-
-Note: This requires OpenFGA's typed tuples which have specific syntax. The flat approach with `privacy_category:email:user@company.com` is simpler to implement and debug.
-
----
-
 ## Security Considerations
 
 1. **Default deny**: If OpenFGA is unavailable or returns an error, the extension should default to masking all PII (fail-closed).
-2. **Store validation**: Validate `storeId` and `modelId` match expected values.
-3. **Network isolation**: OpenFGA server should run in a trusted network segment.
-4. **Audit logging**: Consider logging all authorization decisions for compliance.
+2. **No raw literals in policy engine**: Specific PII values are hashed before being sent to OpenFGA. The authorization store never contains plaintext PII.
+3. **Store validation**: Validate `storeId` and `modelId` match expected values.
+4. **Network isolation**: OpenFGA server should run in a trusted network segment.
+5. **Audit logging**: Consider logging all authorization decisions for compliance.
+6. **Collision resistance**: SHA256 truncation (40 chars) maintains strong collision resistance for the intended use case.
