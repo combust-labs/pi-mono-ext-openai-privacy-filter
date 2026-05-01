@@ -322,18 +322,20 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
 
 ## Detailed Implementation Plan
 
-### Phase 1: OpenFGA Client (`openfga.ts`)
+### Phase 1: OpenFGA Client (`openfga.ts`) — ✅ DONE
 
-- [ ] Add `openfga.ts` to project root
-- [ ] Implement `hashLiteral()` using Node.js `crypto.createHash('sha256')`, truncated to 40 chars
-- [ ] Implement `OpenFGAClient` class with:
-  - [ ] Constructor accepting `apiUrl`, `storeId`, `modelId`
-  - [ ] `check(request)` — POST to `/stores/{storeId}/check`, hash literal if provided, return `boolean`
-  - [ ] `writeTuples(tuples)` — POST to `/stores/{storeId}/write`, hash literals before writing
-  - [ ] `readTuples(filter?)` — GET from `/stores/{storeId}/read`, optional filter by tuple_key
-- [ ] Add `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, `OPENFGA_MODEL_ID`, `PRIVACY_FILTER_MODEL_SUBJECT` env var handling with defaults
-- [ ] Handle errors gracefully — throw on non-2xx responses from OpenFGA
-- [ ] Export `OpenFGAClient` and `hashLiteral` for testing
+- [x] Add `openfga.ts` to project root
+- [x] Implement `hashLiteral()` using Node.js `crypto.createHash('sha256')`, truncated to 40 chars
+- [x] Implement `OpenFGAClient` class with:
+  - [x] Constructor accepting `apiUrl`, `storeId`, `modelId`
+  - [x] `check(request)` — POST to `/stores/{storeId}/check`, hash literal if provided, return `boolean`
+  - [x] `writeTuples(tuples)` — POST to `/stores/{storeId}/write`, hash literals before writing
+  - [x] `readTuples(filter?)` — GET from `/stores/{storeId}/read`, optional filter by tuple_key
+- [x] Add `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, `OPENFGA_MODEL_ID`, `PRIVACY_FILTER_MODEL_SUBJECT` env var handling with defaults
+- [x] Handle errors gracefully — throw on non-2xx responses from OpenFGA
+- [x] Export `OpenFGAClient` and `hashLiteral` for testing
+
+  > Added: `deleteTuples()` for completeness, `getOpenFGAClient()` singleton helper, Bearer token auth support via `OPENFGA_API_TOKEN` env var.
 
 ### Phase 2: Integration (`index.ts`)
 
