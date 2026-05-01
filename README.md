@@ -53,6 +53,26 @@ Set the model path before running pi-mono:
 PRIVACY_FILTER_MODEL_PATH=/path/to/model pi -e ./index.ts
 ```
 
+### Model Configuration for pi-mono-docker
+
+When running inside the [pi-mono-docker](https://github.com/combust-labs/pi-mono-docker) container, mount the local model directory using `--ppi-host-add-path` and pass the model path via `--ppi-pass-env`:
+
+```bash
+function ppi {
+  "${HOME}/.local/bin/ppi" \
+    --ppi-host-attach-models-json \
+    --ppi-host-attach-agents \
+    --ppi-host-attach-prompts \
+    --ppi-pass-env "PRIVACY_FILTER_MODEL_PATH=/.pi/hf/models" \
+    --ppi-host-add-path "${HOME}/dev/models/privacy-filter:/.pi/hf/models/openai/privacy-filter:ro" \
+    "$@"
+}
+```
+
+This mounts `${HOME}/dev/models/privacy-filter` (containing the cloned model files) to `/.pi/hf/models/openai/privacy-filter` inside the container. The extension then looks for the model at `/.pi/hf/models/openai/privacy-filter/config.json`.
+
+See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#ppi-execution-modes) for details on `--ppi-host-add-path` and `--ppi-pass-env`.
+
 ## Configuration
 
 | Environment Variable | Default | Description |
