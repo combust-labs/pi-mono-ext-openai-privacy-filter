@@ -3,7 +3,8 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { env, pipeline } from '@huggingface/transformers';
 import { Box, Text } from '@mariozechner/pi-tui';
-import { getOpenFGAClient } from './openfga';
+
+import { getOpenFGAClient } from './openfga.ts';
 
 const DEFAULT_MODELS_PATH = "~/.cache/huggingface/hub/"
 const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS_PATH;

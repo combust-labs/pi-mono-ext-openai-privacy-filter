@@ -82,6 +82,10 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 |---------------------|---------|-------------|
 | `PRIVACY_FILTER_MODEL_PATH` | `~/.cache/huggingface/hub/` | Base local path for model lookup |
 | `PRIVACY_FILTER_WEBGPU` | `false` | Enable WebGPU acceleration (`true`/`false`) |
+| `OPENFGA_API_URL` | `http://localhost:8080` | OpenFGA REST API URL |
+| `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID |
+| `OPENFGA_MODEL_ID` | `privacy-model` | OpenFGA authorization model ID |
+| `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
 
 ### WebGPU Note
 
@@ -103,6 +107,152 @@ PRIVACY_FILTER_WEBGPU=true pi -e ./index.ts
 | `private_url` | URLs |
 | `private_date` | Dates (birthdays, etc.) |
 | `secret` | Passwords, API keys, tokens |
+
+## OpenFGA Authorization (Optional)
+
+The extension supports fine-grained authorization via [OpenFGA](https://openfga.dev/) to control which PII categories specific models can access. When OpenFGA is configured, the extension queries it before masking PII — allowing some categories to pass through if the model is authorized.
+
+### Quick Start
+
+1. **Start OpenFGA** via Docker Compose:
+```bash
+docker-compose up -d
+```
+
+2. **Initialize the store and authorization model**:
+```bash
+./scripts/openfga-init.sh
+```
+
+   This creates a store named `privacy-policies` and the authorization model. Copy the exported environment variables:
+```bash
+source /tmp/openfga_env.sh
+```
+
+3. **Grant a model access to a PII category**:
+```bash
+# Grant category-level access (model can view all emails)
+./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" email
+
+# Grant specific literal access (model can view a specific email)
+./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256:3f2e8d7c4b1a"
+```
+
+4. **Run pi-mono with the extension**:
+```bash
+OPENFGA_API_URL=http://localhost:8080 \
+OPENFGA_STORE_ID=<your-store-id> \
+OPENFGA_MODEL_ID=<your-model-id> \
+PRIVACY_FILTER_MODEL_PATH=/path/to/model \
+pi -e ./index.ts
+```
+
+### Authorization Model (DSL)
+
+To manually recreate the OpenFGA authorization model, use this DSL:
+
+```python
+model
+  schema 1.1
+
+type model
+  relations
+    define can_view: [privacy_category]
+
+type privacy_category
+  relations
+    define can_view: [model]
+```
+
+Or JSON (use the `/stores/{store_id}/authorization-models` endpoint):
+```json
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {
+      "type": "model",
+      "relations": {
+        "define": {
+          "can_view": ["privacy_category"]
+        }
+      }
+    },
+    {
+      "type": "privacy_category",
+      "relations": {
+        "define": {
+          "can_view": ["model"]
+        }
+      }
+    }
+  ]
+}
+```
+
+### Tuple Examples
+
+| Tuple | Meaning |
+|-------|---------|
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256:<hash>` | Model can view the specific PII whose SHA256 hash is `<hash>` |
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
+
+### Fail-Closed Behavior
+
+If OpenFGA is unreachable or returns an error, the extension **fail-closes** — all detected PII is masked. This ensures no PII leaks when the authorization server is unavailable.
+
+### Security Notes
+
+- **Raw PII literals are never sent to OpenFGA**. Specific values (e.g., `user@company.com`) are hashed with SHA256 before being used as object IDs. Only the hash appears in authorization tuples.
+- The SHA256 hash is truncated to 40 hex characters (20 bytes) for readability while maintaining collision resistance.
+
+### Helper Scripts
+
+| Script | Description |
+|--------|-------------|
+| `scripts/openfga-init.sh` | Create OpenFGA store and authorization model |
+| `scripts/openfga-tuple.sh` | Grant/revoke model access to categories or specific literals |
+
+Usage:
+```bash
+# Initialize (one-time)
+./scripts/openfga-init.sh
+
+# Grant category access
+./scripts/openfga-tuple.sh grant "model-id" email
+
+# Revoke access
+./scripts/openfga-tuple.sh revoke "model-id" email
+
+# List current tuples
+./scripts/openfga-tuple.sh list
+./scripts/openfga-tuple.sh list "model-id"  # filter by model
+```
+
+### Troubleshooting
+
+**OpenFGA connection refused**
+```
+Error: OpenFGA check failed: fetch failed: Connection refused
+```
+- Ensure OpenFGA is running: `docker-compose ps`
+- Check the API URL matches: `OPENFGA_API_URL=http://localhost:8080`
+
+**Store not found (404)**
+```
+Error: OpenFGA check failed (404):
+```
+- Run `./scripts/openfga-init.sh` to create the store and model
+- Verify `OPENFGA_STORE_ID` is set correctly
+
+**All PII is being masked despite authorization**
+- Check tuples: `./scripts/openfga-tuple.sh list "model-id"`
+- Verify the model ID matches exactly (including version suffix if present)
+- Ensure the object format is correct: `privacy_category:<category>` or `privacy_category:sha256:<hash>`
+
+**OpenFGA returns error on write**
+- If using authentication, ensure `OPENFGA_API_TOKEN` is set
+- Check store ID and model ID are correct
 
 ## License
 

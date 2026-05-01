@@ -354,19 +354,21 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
 
   > Model subject is now read from `ctx.model?.id` (pi-mono's active model) at runtime — no `PRIVACY_FILTER_MODEL_SUBJECT` env var needed. If no model is set, extension fail-closes (masks all PII). `buildDeniedCategoriesSet()` helper accepts `modelSubject` as parameter. PII alert now distinguishes MASKED vs ALLOWED per entity.
 
-### Phase 3: Configuration & Documentation
+### Phase 3: Configuration & Documentation — ✅ DONE
 
-- [ ] Add `docker-compose.yaml` for local OpenFGA:
-  - [ ] Service: `openfga` with image `openfga/openfga:latest`
-  - [ ] Ports: `8080:8080` (API), `3000:3000` (Playground)
-  - [ ] Environment: `OPENFGA_LOG_LEVEL=debug`, `OPENFGA_STORE_DATA_DIR=/var/lib/openfga`
-  - [ ] Volume for persistence
-- [ ] Add initialization script or curl commands to create store and model on first startup
-- [ ] Update README.md:
-  - [ ] Document all three new environment variables (OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID)
-  - [ ] Add a "Quick Start" section: run docker-compose, set env vars, use extension
-  - [ ] Document the OpenFGA authorization model (DSL) so operators can recreate it
-  - [ ] Add troubleshooting section for common OpenFGA connection issues
+- [x] Add `docker-compose.yaml` for local OpenFGA:
+  - [x] Service: `openfga` with image `openfga/openfga:latest`
+  - [x] Ports: `8080:8080` (API), `3000:3000` (Playground)
+  - [x] Environment: `OPENFGA_LOG_LEVEL=debug`, `OPENFGA_STORE_DATA_DIR=/var/lib/openfga`
+  - [x] Volume for persistence
+- [x] Add initialization script or curl commands to create store and model on first startup
+  - [x] Add tuple management script (`scripts/openfga-tuple.sh`) for grant/revoke/list operations
+- [x] Update README.md:
+  - [x] Document all new environment variables (OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID, OPENFGA_API_TOKEN)
+  - [x] Add a "Quick Start" section: run docker-compose, set env vars, use extension
+  - [x] Document the OpenFGA authorization model (DSL and JSON) so operators can recreate it
+  - [x] Add troubleshooting section for common OpenFGA connection issues
+  - [x] Document helper scripts (openfga-init.sh, openfga-tuple.sh) with usage examples
 
 ### Phase 4: Testing
 

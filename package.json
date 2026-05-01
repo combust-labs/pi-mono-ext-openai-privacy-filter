@@ -8,6 +8,9 @@
     "build": "echo 'nothing to build'",
     "check": "echo 'nothing to check'"
   },
+  "files": [
+    "*.ts"
+  ],
   "pi": {
     "extensions": [
       "./index.ts"
