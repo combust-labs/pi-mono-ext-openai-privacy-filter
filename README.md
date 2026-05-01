@@ -34,12 +34,15 @@ pi install git:https://github.com/combust-labs/pi-mono-ext-openai-privacy-filter
 
 ## Model Download
 
-Before first use, download the OpenAI Privacy Filter model to a local directory:
+Before first use, download the [OpenAI Privacy Filter](https://huggingface.co/openai/privacy-filter) model to a local directory:
 
 **Option 1 — Git clone (recommended)**:
 ```bash
+git lfs install
 git clone https://huggingface.co/openai/privacy-filter /path/to/model
 ```
+
+> **Note**: Git LFS is required to clone the model. On macOS: `brew install git-lfs`. On Ubuntu/Debian: `apt install git-lfs`. Then run `git lfs install`.
 
 **Option 2 — huggingface-cli**:
 ```bash
