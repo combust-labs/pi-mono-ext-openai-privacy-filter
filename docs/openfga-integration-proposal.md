@@ -248,7 +248,8 @@ const maskedText = maskPII(text, results.filter(r => deniedCategories.has(r.enti
 | `OPENFGA_API_URL` | `http://localhost:8080` | OpenFGA REST API URL |
 | `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID |
 | `OPENFGA_MODEL_ID` | `privacy-model` | Authorization model ID |
-| `PRIVACY_FILTER_MODEL_SUBJECT` | `mlx-community/MiniMax-M2.7-8bit` | Model subject ID for authorization |
+
+> **Note**: The model subject (e.g. `mlx-community/MiniMax-M2.7-8bit`) is read from pi-mono's active model via `ctx.model?.id` at runtime. No environment variable is needed.
 
 ---
 
@@ -343,7 +344,7 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
 - [x] Initialize client with env vars in extension setup (lazy init on first use)
 - [x] In `before_agent_start` handler:
   - [x] After PII detection via `classifier(text)`
-  - [x] For each detected entity, call both `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', literal: entity.word })` and `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', object: entity.entity_group })`
+  - [x] For each detected entity, call both `openfga.check({ subject: modelSubject, relation: 'can_view', literal: entity.word })` and `openfga.check({ subject: modelSubject, relation: 'can_view', object: entity.entity_group })`
   - [x] Build `deniedCategories` set (categories where neither literal nor category check passes)
   - [x] Apply `maskPII()` only to entities in `deniedCategories`
   - [x] If OpenFGA is unreachable, default to masking all PII (fail-closed)
@@ -351,7 +352,7 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
   - [x] Apply same OpenFGA authorization logic before masking PII in message history
   - [x] Only mask categories not authorized by either literal or category-level check
 
-  > Added: `buildDeniedCategoriesSet()` helper — groups entities by category, checks category-level first (efficient), then per-literal. Fail-closed when OpenFGA unreachable. PII alert now distinguishes MASKED vs ALLOWED per entity.
+  > Model subject is now read from `ctx.model?.id` (pi-mono's active model) at runtime — no `PRIVACY_FILTER_MODEL_SUBJECT` env var needed. If no model is set, extension fail-closes (masks all PII). `buildDeniedCategoriesSet()` helper accepts `modelSubject` as parameter. PII alert now distinguishes MASKED vs ALLOWED per entity.
 
 ### Phase 3: Configuration & Documentation
 
@@ -362,7 +363,7 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
   - [ ] Volume for persistence
 - [ ] Add initialization script or curl commands to create store and model on first startup
 - [ ] Update README.md:
-  - [ ] Document all four new environment variables
+  - [ ] Document all three new environment variables (OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID)
   - [ ] Add a "Quick Start" section: run docker-compose, set env vars, use extension
   - [ ] Document the OpenFGA authorization model (DSL) so operators can recreate it
   - [ ] Add troubleshooting section for common OpenFGA connection issues

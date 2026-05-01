@@ -12,7 +12,6 @@ env.allowRemoteModels = false;
 env.localModelPath = LOCAL_MODEL_PATH;
 
 const PRIVACY_FILTER_WEBGPU = process.env.PRIVACY_FILTER_WEBGPU === "true";
-const MODEL_SUBJECT = process.env.PRIVACY_FILTER_MODEL_SUBJECT || "mlx-community/MiniMax-M2.7-8bit";
 
 type AggregatedAnnotation = {
   entity_group: string,
@@ -78,16 +77,18 @@ export default function piiExtension(pi: ExtensionAPI) {
 
     if (results.length === 0) return;
 
-    // Determine which PII categories to mask based on OpenFGA authorization
-    const deniedCategories = await buildDeniedCategoriesSet(results);
+    // Use the model currently active in pi-mono as the authorization subject.
+    // If no model is set, fail-closed (mask all PII).
+    const modelSubject = ctx.model?.id;
+    const deniedCategories = modelSubject
+      ? await buildDeniedCategoriesSet(results, modelSubject)
+      : new Set(results.map(r => r.entity_group));
+
     const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
     const piiToKeep = results.filter(r => !deniedCategories.has(r.entity_group));
 
     // Log detected PII types for transparency — send inline message
     // Distinguish between masked and allowed PII
-    const maskedTypes = [...new Set(piiToMask.map(e => e.entity_group))];
-    const keptTypes = [...new Set(piiToKeep.map(e => e.entity_group))];
-
     const piiLines: string[] = [];
     if (piiToMask.length > 0) {
       piiLines.push(...piiToMask.map(r =>
@@ -133,6 +134,8 @@ export default function piiExtension(pi: ExtensionAPI) {
       !(msg.role === "custom" && (msg as any).customType === "pii-alert")
     );
 
+    const modelSubject = ctx.model?.id;
+
     for (const msg of filteredMessages) {
       if (msg.role === "user") {
         for (const content of msg.content) {
@@ -141,7 +144,9 @@ export default function piiExtension(pi: ExtensionAPI) {
               { aggregation_strategy: "simple" });
             if (results.length > 0) {
               // Apply same OpenFGA authorization logic to context messages
-              const deniedCategories = await buildDeniedCategoriesSet(results);
+              const deniedCategories = modelSubject
+                ? await buildDeniedCategoriesSet(results, modelSubject)
+                : new Set(results.map(r => r.entity_group));
               const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
               if (piiToMask.length > 0) {
                 content.text = maskPII(content.text, piiToMask);
@@ -205,9 +210,13 @@ function maskPII(text: string, pii: AggregatedAnnotation[]): string {
  * and the category-level check return false or throw.
  *
  * If OpenFGA is unreachable, ALL categories are denied (fail-closed).
+ *
+ * @param results - PII entities detected by the classifier
+ * @param modelSubject - The model ID from pi-mono's current context (e.g. "mlx-community/MiniMax-M2.7-8bit")
  */
 async function buildDeniedCategoriesSet(
-  results: AggregatedAnnotation[]
+  results: AggregatedAnnotation[],
+  modelSubject: string,
 ): Promise<Set<string>> {
   const deniedCategories = new Set<string>();
 
@@ -229,7 +238,7 @@ async function buildDeniedCategoriesSet(
     // Try category-level check first (more efficient — one check covers all literals)
     try {
       const canViewCategory = await openfga.check({
-        subject: MODEL_SUBJECT,
+        subject: modelSubject,
         relation: "can_view",
         object: category,
       });
@@ -248,7 +257,7 @@ async function buildDeniedCategoriesSet(
     for (const entity of entities) {
       try {
         const canViewLiteral = await openfga.check({
-          subject: MODEL_SUBJECT,
+          subject: modelSubject,
           relation: "can_view",
           literal: entity.word,
         });
