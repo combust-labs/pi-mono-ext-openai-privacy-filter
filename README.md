@@ -83,6 +83,4 @@ PRIVACY_FILTER_WEBGPU=true pi -e ./index.ts
 
 ## License
 
-Copyright 2025 Combust Labs
-
 Licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE) for details.
