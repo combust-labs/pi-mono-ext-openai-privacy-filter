@@ -2,6 +2,7 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { env, pipeline } from '@huggingface/transformers';
+import { Box, Text } from '@mariozechner/pi-tui';
 
 const DEFAULT_MODELS_PATH = "~/.cache/huggingface/hub/"
 const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS_PATH;
@@ -17,9 +18,39 @@ type AggregatedAnnotation = {
   word: string,
 }
 
+type PIIAlertData = {
+  piiTypes: string[];
+  piiLines: string[];
+}
+
 export default function piiExtension(pi: ExtensionAPI) {
 
   let privacyPipeline: Awaited<ReturnType<typeof pipeline>> | null = null;
+
+  // Register inline message renderer for PII alerts
+  pi.registerMessageRenderer("pii-alert", (message, { expanded }, theme) => {
+    const data = JSON.parse(message.content) as PIIAlertData;
+    const box = new Box(1, 0, (t) => theme.bg("customMessageBg", t));
+
+    // Header with severity indicator
+    box.addChild(new Text(
+      theme.fg("warning", theme.bold("⚠ PII DETECTED")) + " " +
+      theme.fg("muted", data.piiTypes.join(", ")),
+      0, 0
+    ));
+
+    // Each PII item (show more details when expanded)
+    for (const line of data.piiLines) {
+      box.addChild(new Text(theme.fg("dim", line), 0, 0));
+    }
+
+    // Add hint about sanitization when expanded
+    if (expanded) {
+      box.addChild(new Text(theme.fg("muted", "  → Content has been masked for the agent"), 0, 0));
+    }
+
+    return box;
+  });
 
   const initPipeline = async () => {
     if (!privacyPipeline) {
@@ -34,7 +65,7 @@ export default function piiExtension(pi: ExtensionAPI) {
     return privacyPipeline;
   };
 
-  // // Detect and mask PII before sending to provider
+  // Detect and mask PII before sending to provider
   pi.on("before_agent_start", async (event, ctx) => {
 
     const text = event.prompt;
@@ -45,12 +76,19 @@ export default function piiExtension(pi: ExtensionAPI) {
 
     if (results.length === 0) return;
 
-    // Log detected PII types for transparency
+    // Log detected PII types for transparency - send inline message
     const piiTypes = [...new Set(results.map(e => e.entity_group))];
-    ctx.ui.notify(
-      `Detected PII: ${piiTypes.join(", ")} :: ${JSON.stringify(results)}`,
-      "warning"
+    const piiLines = results.map(r =>
+      `  [${r.entity_group.toUpperCase()}] "${r.word}" (${(r.score * 100).toFixed(1)}%)`
     );
+
+    // Send inline message that appears in the chat flow
+    pi.sendMessage({
+      customType: "pii-alert",
+      content: JSON.stringify({ piiTypes, piiLines }),
+      display: true,
+      triggerTurn: false,
+    });
 
     // Inject sanitization instructions
     const maskedText = maskPII(text, results);
@@ -63,43 +101,33 @@ export default function piiExtension(pi: ExtensionAPI) {
 
     return {
       systemPrompt: event.systemPrompt + injection,
-      prompt: injection,
+      prompt: maskedText,
     };
   });
 
   pi.on("context", async (event, ctx) => {
     const classifier = await initPipeline();
-    for (let i=0; i<event.messages.length; i++) {
-      if (event.messages[i].role === "user") {
-        for (let j=0; j<event.messages[i].content.length; j++) {
-          if (event.messages[i].content[j].type === "text")  {
-            const results = await classifier(event.messages[i].content[j].text,
+
+    // Filter out PII alert messages - they are UI-only, not sent to the model
+    const filteredMessages = event.messages.filter(msg =>
+      !(msg.role === "custom" && (msg as any).customType === "pii-alert")
+    );
+
+    for (const msg of filteredMessages) {
+      if (msg.role === "user") {
+        for (const content of msg.content) {
+          if (content.type === "text")  {
+            const results = await classifier(content.text,
               { aggregation_strategy: "simple" });
             if (results.length > 0) {
-              event.messages[i].content[j].text = maskPII(event.messages[i].content[j].text, results);
+              content.text = maskPII(content.text, results);
             }
           }
         }
       }
     }
-    return { messages: event.messages };
+    return { messages: filteredMessages };
   })
-
-  // Block tool calls that might expose PII in logs
-  // pi.on("tool_call", async (event, ctx) => {
-  //   if (!isBashToolResult(event)) return;
-
-  //   const bashEvent = event as ToolCallEvent<"bash", { command: string }>;
-  //   const cmd = bashEvent.input.command;
-
-  //   // Detect commands that might echo PII
-  //   if (cmd.match(/grep.*[A-Za-z]+\.[A-Za-z]+|echo.*@/i)) {
-  //     ctx.ui.notify(
-  //       "Command may log sensitive data - review before execution",
-  //       "warning"
-  //     );
-  //   }
-  // });
 
   // Register command to check text for PII
   pi.registerCommand("check-pii", {
@@ -115,10 +143,17 @@ export default function piiExtension(pi: ExtensionAPI) {
       if (results.length === 0) {
         ctx.ui.notify("No PII detected", "info");
       } else {
-        const summary = results.map(r =>
-          `${r.entity_group}: "${r.word}" (${(r.score * 100).toFixed(1)}%)`
-        ).join("\n");
-        ctx.ui.notify(`PII Found:\n${summary}`, "warning");
+        const piiTypes = [...new Set(results.map(e => e.entity_group))];
+        const piiLines = results.map(r =>
+          `  [${r.entity_group.toUpperCase()}] "${r.word}" (${(r.score * 100).toFixed(1)}%)`
+        );
+
+        // Send inline message for /check-pii command
+        pi.sendMessage({
+          customType: "pii-alert",
+          content: JSON.stringify({ piiTypes, piiLines }),
+          display: true,
+        });
       }
     },
   });
