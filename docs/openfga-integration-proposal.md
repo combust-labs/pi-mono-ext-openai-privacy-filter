@@ -315,8 +315,85 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
 1. Create `openfga.ts` client class with REST API calls and SHA256 hashing
 2. Modify `index.ts` to integrate OpenFGA checks after PII detection
 3. Add environment variables to README documentation
-4. Add `docker-compose.yaml` for local OpenFGA development
+4. Document `docker-compose.yaml` for local OpenFGA development in the readme file.
 5. Write unit tests with a mock OpenFGA server (e.g., using MSW or a simple test server)
+
+---
+
+## Detailed Implementation Plan
+
+### Phase 1: OpenFGA Client (`openfga.ts`)
+
+- [ ] Add `openfga.ts` to project root
+- [ ] Implement `hashLiteral()` using Node.js `crypto.createHash('sha256')`, truncated to 40 chars
+- [ ] Implement `OpenFGAClient` class with:
+  - [ ] Constructor accepting `apiUrl`, `storeId`, `modelId`
+  - [ ] `check(request)` — POST to `/stores/{storeId}/check`, hash literal if provided, return `boolean`
+  - [ ] `writeTuples(tuples)` — POST to `/stores/{storeId}/write`, hash literals before writing
+  - [ ] `readTuples(filter?)` — GET from `/stores/{storeId}/read`, optional filter by tuple_key
+- [ ] Add `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, `OPENFGA_MODEL_ID`, `PRIVACY_FILTER_MODEL_SUBJECT` env var handling with defaults
+- [ ] Handle errors gracefully — throw on non-2xx responses from OpenFGA
+- [ ] Export `OpenFGAClient` and `hashLiteral` for testing
+
+### Phase 2: Integration (`index.ts`)
+
+- [ ] Import `OpenFGAClient` from `./openfga`
+- [ ] Initialize client with env vars in extension setup (lazy init on first use)
+- [ ] In `before_agent_start` handler:
+  - [ ] After PII detection via `classifier(text)`
+  - [ ] For each detected entity, call both `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', literal: entity.word })` and `openfga.check({ subject: MODEL_SUBJECT, relation: 'can_view', object: entity.entity_group })`
+  - [ ] Build `deniedCategories` set (categories where neither literal nor category check passes)
+  - [ ] Apply `maskPII()` only to entities in `deniedCategories`
+  - [ ] If OpenFGA is unreachable, default to masking all PII (fail-closed)
+- [ ] In `context` handler:
+  - [ ] Apply same OpenFGA authorization logic before masking PII in message history
+  - [ ] Only mask categories not authorized by either literal or category-level check
+
+### Phase 3: Configuration & Documentation
+
+- [ ] Add `docker-compose.yaml` for local OpenFGA:
+  - [ ] Service: `openfga` with image `openfga/openfga:latest`
+  - [ ] Ports: `8080:8080` (API), `3000:3000` (Playground)
+  - [ ] Environment: `OPENFGA_LOG_LEVEL=debug`, `OPENFGA_STORE_DATA_DIR=/var/lib/openfga`
+  - [ ] Volume for persistence
+- [ ] Add initialization script or curl commands to create store and model on first startup
+- [ ] Update README.md:
+  - [ ] Document all four new environment variables
+  - [ ] Add a "Quick Start" section: run docker-compose, set env vars, use extension
+  - [ ] Document the OpenFGA authorization model (DSL) so operators can recreate it
+  - [ ] Add troubleshooting section for common OpenFGA connection issues
+
+### Phase 4: Testing
+
+- [ ] Write unit tests for `hashLiteral()`:
+  - [ ] Deterministic output for same input
+  - [ ] Different output for different inputs
+  - [ ] Truncation to 40 characters
+- [ ] Write unit tests for `OpenFGAClient`:
+  - [ ] `check()` returns `true` when OpenFGA returns `allowed: true`
+  - [ ] `check()` returns `false` when OpenFGA returns `allowed: false`
+  - [ ] `check()` hashes literal before sending to OpenFGA
+  - [ ] `writeTuples()` hashes literals before writing
+  - [ ] Throws on non-2xx response
+- [ ] Write integration tests for `index.ts` (mock OpenFGA responses):
+  - [ ] PII masked when OpenFGA denies literal and category
+  - [ ] PII not masked when OpenFGA allows category-level access
+  - [ ] PII not masked when OpenFGA allows literal-level access
+  - [ ] All PII masked when OpenFGA is unreachable (fail-closed)
+- [ ] Add mock OpenFGA server using MSW or a simple Express test server
+- [ ] Ensure tests run in CI without requiring a live OpenFGA instance
+
+### Phase 5: Operational Readiness
+
+- [ ] Add health check: verify OpenFGA server is reachable before first authorization check
+- [ ] Add metrics/logging for:
+  - [ ] Number of PII entities detected per prompt
+  - [ ] Authorization decisions (allowed/denied) per category
+  - [ ] OpenFGA latency
+  - [ ] Errors and fallbacks (fail-closed events)
+- [ ] Document tuple management: how to grant/revoke model access to categories and specific literals
+- [ ] Add example curl commands for common admin operations (grant category, grant specific literal, revoke)
+- [ ] Consider adding a `/check-auth` debug command (similar to `/check-pii`) to inspect authorization state
 
 ---
 
