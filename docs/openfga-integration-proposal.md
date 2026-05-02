@@ -379,16 +379,16 @@ The category-level check (`privacy_category:private_email`) is also performed as
 
 Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run without a live OpenFGA server:
 
-**`check()` tests:**
-- [ ] Returns `true` when OpenFGA responds with `allowed: true`
-- [ ] Returns `false` when OpenFGA responds with `allowed: false`
-- [ ] Sends `model_instance:<subject>` as the user field (not `model:<subject>`)
-- [ ] Sends `privacy_category:sha256-<hash>` when `literal` is provided
-- [ ] Sends `privacy_category:<category>` when only `object` is provided
-- [ ] Sends `Bearer <OPENFGA_API_TOKEN>` Authorization header when env var is set
-- [ ] Sends `authorization_model_id` in request body when `modelId` is configured
-- [ ] Throws on non-2xx response (includes status and body in error message)
-- [ ] Handles network errors gracefully (throws descriptive error)
+**`check()` tests:** — ✅ DONE
+- [x] Returns `true` when OpenFGA responds with `allowed: true`
+- [x] Returns `false` when OpenFGA responds with `allowed: false`
+- [x] Sends `model_instance:<subject>` as the user field (not `model:<subject>`)
+- [x] Sends `privacy_category:sha256-<hash>` when `literal` is provided
+- [x] Sends `privacy_category:<category>` when only `object` is provided
+- [x] Sends `Bearer <OPENFGA_API_TOKEN>` Authorization header when env var is set
+- [x] Sends `authorization_model_id` in request body when `modelId` is configured
+- [x] Throws on non-2xx response (includes status and body in error message)
+- [x] Handles network errors gracefully (throws descriptive error)
 
 **`writeTuples()` tests:**
 - [ ] Hashes each tuple's `literal` before writing to OpenFGA

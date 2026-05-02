@@ -22,6 +22,7 @@
     "webgpu": "0.4.0"
   },
   "devDependencies": {
+    "@types/node-fetch": "^2.6.13",
     "tsx": "^4.21.0"
   }
 }
