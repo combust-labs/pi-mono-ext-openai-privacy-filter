@@ -82,7 +82,7 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 |---------------------|---------|-------------|
 | `PRIVACY_FILTER_MODEL_PATH` | `~/.cache/huggingface/hub/` | Base local path for model lookup |
 | `PRIVACY_FILTER_WEBGPU` | `false` | Enable WebGPU acceleration (`true`/`false`) |
-| `OPENFGA_API_URL` | `http://localhost:8080` | OpenFGA REST API URL |
+| `OPENFGA_API_URL` | `http://localhost:28080` | OpenFGA REST API URL |
 | `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID |
 | `OPENFGA_MODEL_ID` | `privacy-model` | OpenFGA authorization model ID |
 | `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
@@ -114,9 +114,16 @@ The extension supports fine-grained authorization via [OpenFGA](https://openfga.
 
 ### Quick Start
 
-1. **Start OpenFGA** via Docker Compose:
+1. **Start OpenFGA** via Docker:
 ```bash
-docker-compose up -d
+docker run \
+  --name pi-mono-privacy-filter-openfga \
+  --restart unless-stopped \
+  -p 28080:8080 \
+  -p 3000:3000 \
+  -e OPENFGA_LOG_LEVEL=debug \
+  openfga/openfga:latest \
+  run
 ```
 
 2. **Initialize the store and authorization model**:
@@ -135,12 +142,12 @@ source /tmp/openfga_env.sh
 ./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" email
 
 # Grant specific literal access (model can view a specific email)
-./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256:3f2e8d7c4b1a"
+./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256-3f2e8d7c4b1a"
 ```
 
 4. **Run pi-mono with the extension**:
 ```bash
-OPENFGA_API_URL=http://localhost:8080 \
+OPENFGA_API_URL=http://localhost:28080 \
 OPENFGA_STORE_ID=<your-store-id> \
 OPENFGA_MODEL_ID=<your-model-id> \
 PRIVACY_FILTER_MODEL_PATH=/path/to/model \
@@ -194,7 +201,7 @@ Or JSON (use the `/stores/{store_id}/authorization-models` endpoint):
 | Tuple | Meaning |
 |-------|---------|
 | `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256:<hash>` | Model can view the specific PII whose SHA256 hash is `<hash>` |
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-<hash>` | Model can view the specific PII whose SHA256 hash is `<hash>` |
 | `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
 
 ### Fail-Closed Behavior
@@ -235,8 +242,8 @@ Usage:
 ```
 Error: OpenFGA check failed: fetch failed: Connection refused
 ```
-- Ensure OpenFGA is running: `docker-compose ps`
-- Check the API URL matches: `OPENFGA_API_URL=http://localhost:8080`
+- Ensure OpenFGA is running: `docker ps | grep openfga`
+- Check the API URL matches: `OPENFGA_API_URL=http://localhost:28080`
 
 **Store not found (404)**
 ```
@@ -248,7 +255,7 @@ Error: OpenFGA check failed (404):
 **All PII is being masked despite authorization**
 - Check tuples: `./scripts/openfga-tuple.sh list "model-id"`
 - Verify the model ID matches exactly (including version suffix if present)
-- Ensure the object format is correct: `privacy_category:<category>` or `privacy_category:sha256:<hash>`
+- Ensure the object format is correct: `privacy_category:<category>` or `privacy_category:sha256-<hash>`
 
 **OpenFGA returns error on write**
 - If using authentication, ensure `OPENFGA_API_TOKEN` is set

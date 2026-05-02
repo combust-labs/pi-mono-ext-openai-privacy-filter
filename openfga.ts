@@ -13,7 +13,7 @@ import { createHash } from 'crypto';
 // Configuration
 // ---------------------------------------------------------------------------
 
-const OPENFGA_API_URL = process.env.OPENFGA_API_URL || "http://localhost:8080";
+const OPENFGA_API_URL = process.env.OPENFGA_API_URL || "http://localhost:28080";
 const OPENFGA_STORE_ID = process.env.OPENFGA_STORE_ID || "privacy-policies";
 const OPENFGA_MODEL_ID = process.env.OPENFGA_MODEL_ID || "privacy-model";
 
@@ -95,7 +95,7 @@ export class OpenFGAClient {
         },
         body: JSON.stringify({
           tuple_key: {
-            user: `model:${request.subject}`,
+            user: `model_instance:${request.subject}`,
             relation: request.relation,
             object: objectId,
           },
@@ -122,7 +122,7 @@ export class OpenFGAClient {
     const tupleKeys = tuples.map(t => {
       const objectId = this.buildObjectIdFromTuple(t);
       return {
-        user: `model:${t.subject}`,
+        user: `model_instance:${t.subject}`,
         relation: t.relation,
         object: objectId,
       };
@@ -155,7 +155,7 @@ export class OpenFGAClient {
     const tupleKeys = tuples.map(t => {
       const objectId = this.buildObjectIdFromTuple(t);
       return {
-        user: `model:${t.subject}`,
+        user: `model_instance:${t.subject}`,
         relation: t.relation,
         object: objectId,
       };
@@ -186,7 +186,7 @@ export class OpenFGAClient {
    */
   async readTuples(filter?: ReadFilter): Promise<unknown[]> {
     const params = new URLSearchParams();
-    if (filter?.subject) params.set("user", `model:${filter.subject}`);
+    if (filter?.subject) params.set("user", `model_instance:${filter.subject}`);
     if (filter?.relation) params.set("relation", filter.relation);
     if (filter?.object) params.set("object", `privacy_category:${filter.object}`);
 
@@ -215,9 +215,9 @@ export class OpenFGAClient {
   private buildObjectId(request: CheckRequest): string {
     if (request.literal) {
       // Never send raw literal — hash it
-      return `privacy_category:sha256:${hashLiteral(request.literal)}`;
+      return `privacy_category:sha256-${hashLiteral(request.literal)}`;
     }
-    if (request.object?.startsWith("sha256:")) {
+    if (request.object?.startsWith("sha256-")) {
       // Already a hash
       return `privacy_category:${request.object}`;
     }
@@ -227,7 +227,7 @@ export class OpenFGAClient {
 
   private buildObjectIdFromTuple(tuple: WriteTuple): string {
     if (tuple.literal) {
-      return `privacy_category:sha256:${hashLiteral(tuple.literal)}`;
+      return `privacy_category:sha256-${hashLiteral(tuple.literal)}`;
     }
     return `privacy_category:${tuple.object}`;
   }

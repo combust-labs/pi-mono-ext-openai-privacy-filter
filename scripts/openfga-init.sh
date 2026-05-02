@@ -10,7 +10,7 @@
 
 set -e
 
-OPENFGA_API_URL="${OPENFGA_API_URL:-http://localhost:8080}"
+OPENFGA_API_URL="${OPENFGA_API_URL:-http://localhost:28080}"
 STORE_NAME="privacy-policies"
 STORE_ID="${OPENFGA_STORE_ID:-}"
 
@@ -67,24 +67,42 @@ create_model() {
     local model_id
     log_info "Creating authorization model..."
     local response
-    response=$(curl -sf -X PUT "${OPENFGA_API_URL}/stores/${STORE_ID}/authorization-models" \
+    response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/authorization-models" \
         -H "Content-Type: application/json" \
         -d '{
             "schema_version": "1.1",
             "type_definitions": [
                 {
-                    "type": "model",
+                    "type": "model_instance",
                     "relations": {
-                        "define": {
-                            "can_view": ["privacy_category"]
+                        "can_view": {
+                            "this": {}
+                        }
+                    },
+                    "metadata": {
+                        "relations": {
+                            "can_view": {
+                                "directly_related_user_types": [
+                                    { "type": "model_instance" }
+                                ]
+                            }
                         }
                     }
                 },
                 {
                     "type": "privacy_category",
                     "relations": {
-                        "define": {
-                            "can_view": ["model"]
+                        "can_view": {
+                            "this": {}
+                        }
+                    },
+                    "metadata": {
+                        "relations": {
+                            "can_view": {
+                                "directly_related_user_types": [
+                                    { "type": "model_instance" }
+                                ]
+                            }
                         }
                     }
                 }
@@ -119,7 +137,7 @@ print_env() {
     echo "    -d '{"
     echo "      \"writes\": {"
     echo "        \"tuple_keys\": ["
-    echo "          {\"user\": \"model:mlx-community/MiniMax-M2.7-8bit\", \"relation\": \"can_view\", \"object\": \"privacy_category:email\"}"
+    echo "          {\"user\": \"model_instance:mlx-community/MiniMax-M2.7-8bit\", \"relation\": \"can_view\", \"object\": \"privacy_category:email\"}"
     echo "        ]"
     echo "      }"
     echo "    }'"

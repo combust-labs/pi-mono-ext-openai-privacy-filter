@@ -25,7 +25,7 @@ Object:     privacy_category or privacy_category:sha256_hash_of_literal
 | Tuple | Meaning |
 |-------|---------|
 | `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256:3f2e8d7c4b1a` | Model can view the specific email whose SHA256 is `3f2e8d7c4b1a` |
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-3f2e8d7c4b1a` | Model can view the specific email whose SHA256 is `3f2e8d7c4b1a` |
 | `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
 
 ### SHA256 Hash Computation
@@ -89,7 +89,7 @@ type privacy_category
     define can_view: [model]
 ```
 
-> **Note**: The object portion of a tuple uses `privacy_category:<category>` for category-level checks and `privacy_category:sha256:<hash>` for specific literal checks. The SHA256 hash is stored directly in the object ID — no special relation type is needed.
+> **Note**: The object portion of a tuple uses `privacy_category:<category>` for category-level checks and `privacy_category:sha256-<hash>` for specific literal checks. The SHA256 hash is stored directly in the object ID — no special relation type is needed.
 
 ---
 
@@ -103,7 +103,7 @@ type privacy_category
 import { createHash } from 'crypto';
 
 type OpenFGAClientConfig = {
-  apiUrl: string;      // e.g., "http://localhost:8080"
+  apiUrl: string;      // e.g., "http://localhost:28080"
   storeId: string;     // e.g., "privacy-policies"
   modelId: string;     // e.g., "privacy-model"
 };
@@ -111,7 +111,7 @@ type OpenFGAClientConfig = {
 type CheckRequest = {
   subject: string;       // e.g., "mlx-community/MiniMax-M2.7-8bit"
   relation: string;      // e.g., "can_view"
-  object: string;        // e.g., "email" or "sha256:3f2e8d7c4b1a..."
+  object: string;        // e.g., "email" or "sha256-3f2e8d7c4b1a..."
   literal?: string;      // e.g., "user@company.com" — if provided, object is ignored and hash is computed
 };
 
@@ -128,8 +128,8 @@ export class OpenFGAClient {
 
     if (request.literal) {
       // Hash the literal — never use raw value in policy engine
-      objectId = `privacy_category:sha256:${hashLiteral(request.literal)}`;
-    } else if (request.object.startsWith('sha256:')) {
+      objectId = `privacy_category:sha256-${hashLiteral(request.literal)}`;
+    } else if (request.object.startsWith('sha256-')) {
       // Already a hash
       objectId = `privacy_category:${request.object}`;
     } else {
@@ -176,7 +176,7 @@ export class OpenFGAClient {
             tuple_keys: tuples.map(t => {
               let objectId: string;
               if (t.literal) {
-                objectId = `privacy_category:sha256:${hashLiteral(t.literal)}`;
+                objectId = `privacy_category:sha256-${hashLiteral(t.literal)}`;
               } else {
                 objectId = `privacy_category:${t.object}`;
               }
@@ -199,7 +199,7 @@ export class OpenFGAClient {
 ```typescript
 import { OpenFGAClient } from "./openfga";
 
-const OPENFGA_API_URL = process.env.OPENFGA_API_URL || "http://localhost:8080";
+const OPENFGA_API_URL = process.env.OPENFGA_API_URL || "http://localhost:28080";
 const OPENFGA_STORE_ID = process.env.OPENFGA_STORE_ID || "privacy-policies";
 const OPENFGA_MODEL_ID = process.env.OPENFGA_MODEL_ID || "privacy-model";
 const MODEL_SUBJECT = process.env.PRIVACY_FILTER_MODEL_SUBJECT || "mlx-community/MiniMax-M2.7-8bit";
@@ -245,7 +245,7 @@ const maskedText = maskPII(text, results.filter(r => deniedCategories.has(r.enti
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENFGA_API_URL` | `http://localhost:8080` | OpenFGA REST API URL |
+| `OPENFGA_API_URL` | `http://localhost:28080` | OpenFGA REST API URL |
 | `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID |
 | `OPENFGA_MODEL_ID` | `privacy-model` | Authorization model ID |
 
@@ -272,13 +272,13 @@ const maskedText = maskPII(text, results.filter(r => deniedCategories.has(r.enti
 # SHA256("admin@company.com") = 3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e
 # SHA256("user@company.com")  = 7c8b4a1f3e2d9c8b4a1f3e2d9c8b4a1f3e2d
 
-curl -X POST http://localhost:8080/stores/privacy-policies/write \
+curl -X POST http://localhost:28080/stores/privacy-policies/write \
   -H "Content-Type: application/json" \
   -d '{
     "writes": {
       "tuple_keys": [
         {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:email"},
-        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:sha256:3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e"}
+        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:sha256-3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e"}
       ]
     }
   }'
@@ -298,8 +298,8 @@ For each detected PII entity, the extension computes the SHA256 hash locally and
 
 | PII Entity | SHA256 Hash (truncated) | OpenFGA Check | Result |
 |------------|-------------------------|---------------|--------|
-| `admin@company.com` (email) | `3f2e8d7c4b1a...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256:3f2e8d7c4b1a...)` | **allowed** → not masked |
-| `user@company.com` (email) | `7c8b4a1f3e2d...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256:7c8b4a1f3e2d...)` | **denied** → masked as `[EMAIL REDACTED]` |
+| `admin@company.com` (email) | `3f2e8d7c4b1a...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-3f2e8d7c4b1a...)` | **allowed** → not masked |
+| `user@company.com` (email) | `7c8b4a1f3e2d...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-7c8b4a1f3e2d...)` | **denied** → masked as `[EMAIL REDACTED]` |
 
 The category-level check (`privacy_category:email`) is also performed as a fallback — if the model has category-level access, any literal under that category is allowed.
 
@@ -358,7 +358,7 @@ The category-level check (`privacy_category:email`) is also performed as a fallb
 
 - [x] Add `docker-compose.yaml` for local OpenFGA:
   - [x] Service: `openfga` with image `openfga/openfga:latest`
-  - [x] Ports: `8080:8080` (API), `3000:3000` (Playground)
+  - [x] Ports: `28080:8080` (API), `3000:3000` (Playground)
   - [x] Environment: `OPENFGA_LOG_LEVEL=debug`, `OPENFGA_STORE_DATA_DIR=/var/lib/openfga`
   - [x] Volume for persistence
 - [x] Add initialization script or curl commands to create store and model on first startup

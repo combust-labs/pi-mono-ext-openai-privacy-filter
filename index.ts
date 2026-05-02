@@ -235,7 +235,6 @@ async function buildDeniedCategoriesSet(
 
   for (const [category, entities] of categoryEntities) {
     let categoryAllowed = false;
-
     // Try category-level check first (more efficient — one check covers all literals)
     try {
       const canViewCategory = await openfga.check({

@@ -5,8 +5,8 @@
 # Grant or revoke model access to PII categories or specific literals.
 #
 # Usage:
-#   ./scripts/openfga-tuple.sh grant <model-id> <category|sha256:hash> [relation]
-#   ./scripts/openfga-tuple.sh revoke <model-id> <category|sha256:hash> [relation]
+#   ./scripts/openfga-tuple.sh grant <model-id> <category|sha256-hash> [relation]
+#   ./scripts/openfga-tuple.sh revoke <model-id> <category|sha256-hash> [relation]
 #   ./scripts/openfga-tuple.sh list [model-id]
 #
 # Examples:
@@ -14,7 +14,7 @@
 #   ./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" email
 #
 #   # Grant model access to a specific email (literal-level, hash provided)
-#   ./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256:3f2e8d7c4b1a"
+#   ./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256-3f2e8d7c4b1a"
 #
 #   # Revoke model access to secrets
 #   ./scripts/openfga-tuple.sh revoke "mlx-community/MiniMax-M2.7-8bit" secret
@@ -26,7 +26,7 @@
 
 set -e
 
-OPENFGA_API_URL="${OPENFGA_API_URL:-http://localhost:8080}"
+OPENFGA_API_URL="${OPENFGA_API_URL:-http://localhost:28080}"
 STORE_ID="${OPENFGA_STORE_ID:-}"
 MODEL_ID="${OPENFGA_MODEL_ID:-}"
 
@@ -46,15 +46,17 @@ usage() {
     echo "Usage: $0 <grant|revoke|list> [args]"
     echo ""
     echo "Commands:"
-    echo "  grant <model-id> <category|sha256:hash> [relation]"
+    echo "  grant <model-id> <category|sha256-hash> [relation]"
     echo "          Grant a model permission to view a PII category or specific literal"
-    echo "  revoke <model-id> <category|sha256:hash> [relation]"
+    echo "  revoke <model-id> <category|sha256-hash> [relation]"
     echo "          Revoke a model's permission to view a PII category or specific literal"
+    echo "  check <model-id> <category|sha256-hash> [relation]"
+    echo "          Check if a model has a specific relation to a PII category or literal"
     echo "  list [model-id]"
     echo "          List all tuples (optionally filtered by model)"
     echo ""
     echo "Environment Variables:"
-    echo "  OPENFGA_API_URL  (default: http://localhost:8080)"
+    echo "  OPENFGA_API_URL  (default: http://localhost:28080)"
     echo "  OPENFGA_STORE_ID (required)"
     echo "  OPENFGA_MODEL_ID (optional, for some deployments)"
     exit 1
@@ -76,11 +78,11 @@ check_openfga() {
 }
 
 # Build the object ID from the input
-# If input starts with "sha256:", use it directly
+# If input starts with "sha256-", use it directly
 # Otherwise, prefix with "privacy_category:"
 build_object_id() {
     local input="$1"
-    if [[ "${input}" == sha256:* ]]; then
+    if [[ "${input}" == sha256-* ]]; then
         echo "privacy_category:${input}"
     else
         echo "privacy_category:${input}"
@@ -97,7 +99,7 @@ grant() {
 
     log_action "Granting ${model_id} ${relation} on ${object_id}"
 
-    local body="{\"writes\":{\"tuple_keys\":[{\"user\":\"model:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
+    local body="{\"writes\":{\"tuple_keys\":[{\"user\":\"model_instance:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
 
     local response
     if response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/write" \
@@ -121,7 +123,7 @@ revoke() {
 
     log_action "Revoking ${model_id} ${relation} on ${object_id}"
 
-    local body="{\"deletes\":{\"tuple_keys\":[{\"user\":\"model:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
+    local body="{\"deletes\":{\"tuple_keys\":[{\"user\":\"model_instance:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
 
     local response
     if response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/write" \
@@ -141,13 +143,13 @@ list_tuples() {
     local url="${OPENFGA_API_URL}/stores/${STORE_ID}/read"
 
     if [ -n "${model_filter}" ]; then
-        url="${url}?user=model:${model_filter}"
+        url="${url}?user=model_instance:${model_filter}"
     fi
 
     log_action "Fetching tuples from ${url}"
 
     local response
-    response=$(curl -sf -X GET "${url}" \
+    response=$(curl -sf -X POST "${url}" \
         -H "Content-Type: application/json" \
         ${MODEL_ID:+-H "Authorization: Bearer ${OPENFGA_API_TOKEN:-}"})
 
@@ -157,6 +159,38 @@ list_tuples() {
     fi
 
     echo "${response}" | python3 -m json.tool 2>/dev/null || echo "${response}"
+}
+
+# Check if a tuple exists
+check_tuple() {
+    local model_id="$1"
+    local target="$2"
+    local relation="${3:-can_view}"
+    local object_id
+    object_id=$(build_object_id "${target}")
+
+    log_action "Checking ${model_id} ${relation} on ${object_id}"
+
+    local body="{\"tuple_key\":{\"user\":\"model_instance:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}}"
+
+    local response
+    if response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/check" \
+        -H "Content-Type: application/json" \
+        ${MODEL_ID:+-H "Authorization: Bearer ${OPENFGA_API_TOKEN:-}"} \
+        -d "${body}"); then
+        local allowed
+        allowed=$(echo "${response}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('allowed', False))" 2>/dev/null || echo "false")
+        if [ "${allowed}" = "True" ] || [ "${allowed}" = "true" ]; then
+            log_info "Tuple exists: ALLOWED"
+            return 0
+        else
+            log_warn "Tuple does not exist: DENIED"
+            return 1
+        fi
+    else
+        log_error "Failed to check tuple: ${response}"
+        return 1
+    fi
 }
 
 main() {
@@ -172,7 +206,7 @@ main() {
     case "${command}" in
         grant)
             if [ $# -lt 2 ]; then
-                log_error "grant requires <model-id> and <category|sha256:hash>"
+                log_error "grant requires <model-id> and <category|sha256-hash>"
                 usage
             fi
             check_config
@@ -180,11 +214,19 @@ main() {
             ;;
         revoke)
             if [ $# -lt 2 ]; then
-                log_error "revoke requires <model-id> and <category|sha256:hash>"
+                log_error "revoke requires <model-id> and <category|sha256-hash>"
                 usage
             fi
             check_config
             revoke "$1" "$2" "${3:-can_view}"
+            ;;
+        check)
+            if [ $# -lt 2 ]; then
+                log_error "check requires <model-id> and <category|sha256-hash>"
+                usage
+            fi
+            check_config
+            check_tuple "$1" "$2" "${3:-can_view}"
             ;;
         list)
             check_config
