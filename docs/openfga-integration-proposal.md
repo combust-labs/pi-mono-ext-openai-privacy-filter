@@ -401,12 +401,12 @@ Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run 
 - [x] Sends tuples under the `deletes` key in request body
 - [x] Throws on non-2xx response
 
-**`readTuples()` tests:**
-- [ ] Builds correct query params when `filter.subject` is provided
-- [ ] Builds correct query params when `filter.relation` is provided
-- [ ] Builds correct query params when `filter.object` is provided (prefixes with `privacy_category:`)
-- [ ] Returns `result.tuples` array from response body
-- [ ] Throws on non-2xx response
+**`readTuples()` tests:** — ✅ DONE
+- [x] Builds correct query params when `filter.subject` is provided
+- [x] Builds correct query params when `filter.relation` is provided
+- [x] Builds correct query params when `filter.object` is provided (prefixes with `privacy_category:`)
+- [x] Returns `result.tuples` array from response body
+- [x] Throws on non-2xx response
 
 #### 4.3 `buildDeniedCategoriesSet()` Unit Tests
 
