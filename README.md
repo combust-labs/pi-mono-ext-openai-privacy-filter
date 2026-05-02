@@ -162,13 +162,13 @@ To manually recreate the OpenFGA authorization model, use this DSL:
 model
   schema 1.1
 
-type model
+type model_instance
   relations
     define can_view: [privacy_category]
 
 type privacy_category
   relations
-    define can_view: [model]
+    define can_view: [model_instance]
 ```
 
 Or JSON (use the `/stores/{store_id}/authorization-models` endpoint):
@@ -177,18 +177,36 @@ Or JSON (use the `/stores/{store_id}/authorization-models` endpoint):
   "schema_version": "1.1",
   "type_definitions": [
     {
-      "type": "model",
+      "type": "model_instance",
       "relations": {
-        "define": {
-          "can_view": ["privacy_category"]
+        "can_view": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "can_view": {
+            "directly_related_user_types": [
+              { "type": "model_instance" }
+            ]
+          }
         }
       }
     },
     {
       "type": "privacy_category",
       "relations": {
-        "define": {
-          "can_view": ["model"]
+        "can_view": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "can_view": {
+            "directly_related_user_types": [
+              { "type": "model_instance" }
+            ]
+          }
         }
       }
     }
@@ -200,9 +218,9 @@ Or JSON (use the `/stores/{store_id}/authorization-models` endpoint):
 
 | Tuple | Meaning |
 |-------|---------|
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-<hash>` | Model can view the specific PII whose SHA256 hash is `<hash>` |
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-<hash>` | Model can view the specific PII whose SHA256 hash is `<hash>` |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
 
 ### Fail-Closed Behavior
 
@@ -230,6 +248,9 @@ Usage:
 
 # Revoke access
 ./scripts/openfga-tuple.sh revoke "model-id" email
+
+# Check if a model has access to a category or literal
+./scripts/openfga-tuple.sh check "model-id" email
 
 # List current tuples
 ./scripts/openfga-tuple.sh list
