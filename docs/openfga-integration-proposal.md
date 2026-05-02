@@ -16,7 +16,7 @@ Object:     privacy_category or privacy_category:sha256_hash_of_literal
 
 ### Design Rationale
 
-- **Category** is stored as a plain string (e.g., `email`, `secret`) since it is not sensitive metadata.
+- **Category** is stored as a plain string (e.g., `private_email`, `secret`) since it is not sensitive metadata.
 - **Specific literals** (e.g., `user@company.com`) are **never** stored in the policy engine. Instead, a SHA256 hash of the literal is used as the object identifier.
 - This prevents the authorization policy from leaking or inadvertently logging sensitive PII values.
 
@@ -24,7 +24,7 @@ Object:     privacy_category or privacy_category:sha256_hash_of_literal
 
 | Tuple | Meaning |
 |-------|---------|
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
+| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:private_email` | Model can view all emails (category-level) |
 | `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-3f2e8d7c4b1a` | Model can view the specific email whose SHA256 is `3f2e8d7c4b1a` |
 | `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
 
@@ -111,7 +111,7 @@ type OpenFGAClientConfig = {
 type CheckRequest = {
   subject: string;       // e.g., "mlx-community/MiniMax-M2.7-8bit"
   relation: string;      // e.g., "can_view"
-  object: string;        // e.g., "email" or "sha256-3f2e8d7c4b1a..."
+  object: string;        // e.g., "private_email" or "sha256-3f2e8d7c4b1a..."
   literal?: string;      // e.g., "user@company.com" — if provided, object is ignored and hash is computed
 };
 
@@ -215,7 +215,7 @@ const openfga = new OpenFGAClient({
 const deniedCategories = new Set<string>();
 
 for (const entity of results) {
-  const category = entity.entity_group;    // e.g., "email"
+  const category = entity.entity_group;    // e.g., "private_email"
   const literal = entity.word;             // e.g., "user@company.com"
 
   // Check specific literal (hashed) AND general category
@@ -277,7 +277,7 @@ curl -X POST http://localhost:28080/stores/privacy-policies/write \
   -d '{
     "writes": {
       "tuple_keys": [
-        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:email"},
+        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:private_email"},
         {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:sha256-3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e"}
       ]
     }
@@ -301,7 +301,7 @@ For each detected PII entity, the extension computes the SHA256 hash locally and
 | `admin@company.com` (email) | `3f2e8d7c4b1a...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-3f2e8d7c4b1a...)` | **allowed** → not masked |
 | `user@company.com` (email) | `7c8b4a1f3e2d...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-7c8b4a1f3e2d...)` | **denied** → masked as `[EMAIL REDACTED]` |
 
-The category-level check (`privacy_category:email`) is also performed as a fallback — if the model has category-level access, any literal under that category is allowed.
+The category-level check (`privacy_category:private_email`) is also performed as a fallback — if the model has category-level access, any literal under that category is allowed.
 
 ### Step 4: Prompt to model after masking
 

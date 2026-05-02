@@ -139,7 +139,7 @@ source /tmp/openfga_env.sh
 3. **Grant a model access to a PII category**:
 ```bash
 # Grant category-level access (model can view all emails)
-./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" email
+./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" private_email
 
 # Grant specific literal access (model can view a specific email)
 ./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256-3f2e8d7c4b1a"
@@ -218,7 +218,7 @@ Or JSON (use the `/stores/{store_id}/authorization-models` endpoint):
 
 | Tuple | Meaning |
 |-------|---------|
-| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:email` | Model can view all emails (category-level) |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:private_email` | Model can view all emails (category-level) |
 | `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-<hash>` | Model can view the specific PII whose SHA256 hash is `<hash>` |
 | `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
 
@@ -244,13 +244,13 @@ Usage:
 ./scripts/openfga-init.sh
 
 # Grant category access
-./scripts/openfga-tuple.sh grant "model-id" email
+./scripts/openfga-tuple.sh grant "model-id" private_email
 
 # Revoke access
-./scripts/openfga-tuple.sh revoke "model-id" email
+./scripts/openfga-tuple.sh revoke "model-id" private_email
 
 # Check if a model has access to a category or literal
-./scripts/openfga-tuple.sh check "model-id" email
+./scripts/openfga-tuple.sh check "model-id" private_email
 
 # List current tuples
 ./scripts/openfga-tuple.sh list
