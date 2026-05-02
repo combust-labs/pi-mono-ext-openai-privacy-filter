@@ -390,11 +390,11 @@ Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run 
 - [x] Throws on non-2xx response (includes status and body in error message)
 - [x] Handles network errors gracefully (throws descriptive error)
 
-**`writeTuples()` tests:**
-- [ ] Hashes each tuple's `literal` before writing to OpenFGA
-- [ ] Uses category-only object when `object` is provided without `literal`
-- [ ] Sends `model_instance:<subject>` as the user field
-- [ ] Throws on non-2xx response
+**`writeTuples()` tests:** — ✅ DONE
+- [x] Hashes each tuple's `literal` before writing to OpenFGA
+- [x] Uses category-only object when `object` is provided without `literal`
+- [x] Sends `model_instance:<subject>` as the user field
+- [x] Throws on non-2xx response
 
 **`deleteTuples()` tests:**
 - [ ] Same hashing and user field behavior as `writeTuples()`
