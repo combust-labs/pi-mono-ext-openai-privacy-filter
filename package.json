@@ -6,7 +6,8 @@
   "scripts": {
     "clean": "echo 'nothing to clean'",
     "build": "echo 'nothing to build'",
-    "check": "echo 'nothing to check'"
+    "check": "echo 'nothing to check'",
+    "test": "node --import tsx --test"
   },
   "files": [
     "*.ts"
@@ -19,5 +20,8 @@
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
     "webgpu": "0.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
   }
 }

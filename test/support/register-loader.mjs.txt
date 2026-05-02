@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * Register loader for Node.js test runner to handle TypeScript imports.
+ * Uses Node's built-in experimental TypeScript transformation.
+ */
+import { register } from 'node:module';
+import { pathToFileURL } from 'node:url';
+
+register('node:experimental-transform-types', pathToFileURL('/code/'));

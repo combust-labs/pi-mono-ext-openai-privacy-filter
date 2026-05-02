@@ -368,12 +368,12 @@ The category-level check (`privacy_category:private_email`) is also performed as
 
 ### Phase 4: Testing
 
-#### 4.1 `hashLiteral()` Unit Tests
+#### 4.1 `hashLiteral()` Unit Tests — ✅ DONE
 
-- [ ] Deterministic output: same input always produces same hash
-- [ ] Different inputs produce different hashes (no collisions on small set)
-- [ ] Output is truncated to exactly 40 hex characters
-- [ ] Empty string produces a valid 40-char hash
+- [x] Deterministic output: same input always produces same hash
+- [x] Different inputs produce different hashes (no collisions on small set)
+- [x] Output is truncated to exactly 40 hex characters
+- [x] Empty string produces a valid 40-char hash
 
 #### 4.2 `OpenFGAClient` Unit Tests
 
@@ -436,7 +436,7 @@ Mock both the HuggingFace `pipeline` (token-classification) and the OpenFGA `che
 
 - [ ] Add `test/support/openfga-mock.ts` — exports a `createMockOpenFGAClient()` that records calls and returns configurable responses, implementing the same interface as `OpenFGAClient`
 - [ ] Add `test/support/pi-extension-shim.ts` — fake `ExtensionContext` for testing extension registration without a real pi process (see `docs/proposal-extension-integration-tests.md`)
-- [ ] Tests run with `node --experimental-transform-types --import ./test/support/register-loader.mjs --test` (no live OpenFGA or HuggingFace model needed)
+- [x] Tests run with `node --import tsx --test` (tsx handles TypeScript transpilation; no live OpenFGA or HuggingFace model needed)
 - [ ] All tests pass in headless CI environment
 
 ### Phase 5: Operational Readiness
