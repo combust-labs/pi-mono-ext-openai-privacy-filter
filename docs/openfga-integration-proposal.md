@@ -410,12 +410,57 @@ Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run 
 
 #### 4.3 `buildDeniedCategoriesSet()` Unit Tests
 
-- [ ] Returns all detected categories as denied when OpenFGA is unreachable (fail-closed)
-- [ ] Returns empty set when all categories pass category-level check
-- [ ] Returns empty set when all individual literals pass literal-level check
-- [ ] Returns only categories that fail both literal and category checks
-- [ ] Groups entities by category and makes one category-level check per group (not per-entity)
-- [ ] Short-circuits to fail-closed immediately on first OpenFGA error (no unnecessary calls)
+> **Prerequisites**: The `buildDeniedCategoriesSet()` function must be exported from `index.ts` (or moved to a testable module) so it can be directly imported in tests. Additionally, `getOpenFGAClient()` must be mockable — either by making it injectable or by adding a `setOpenFGAClient(client)` setter in `openfga.ts` for testing purposes.
+
+**Test infrastructure needed**:
+
+1. **`test/support/mock-openfga-client.ts`** — A mock implementing the `OpenFGAClient` interface:
+   ```typescript
+   type MockOpenFGAClient = {
+     checkResults: Map<string, boolean>;  // key: `${subject}:${relation}:${object|literal}` → result
+     checkCalls: Array<{ subject: string; relation: string; literal?: string; object?: string }>;
+     shouldThrow: boolean;
+     throwError: Error;
+     check: (req: CheckRequest) => Promise<boolean>;
+   };
+   ```
+
+2. **`test/support/mock-openfga-client.ts`** — A `createMockOpenFGAClient()` factory:
+   ```typescript
+   export function createMockOpenFGAClient(): MockOpenFGAClient;
+   export function resetOpenFGAClient(): void;  // resets singleton for test isolation
+   ```
+
+3. **In `openfga.ts`**, add a test injection point (e.g., `setOpenFGAClient(client)` that overrides the singleton for tests). Alternatively, refactor `buildDeniedCategoriesSet()` to accept an optional `openfgaClient` parameter, defaulting to `getOpenFGAClient()`.
+
+**Implementation approach**:
+- Import `buildDeniedCategoriesSet` directly (after exporting it from `index.ts`).
+- Use `createMockOpenFGAClient()` to get a configurable mock.
+- Override the singleton via `setOpenFGAClient(mock)` before each test.
+- Call `buildDeniedCategoriesSet(results, modelSubject)` and assert on the returned `Set<string>`.
+- Reset the singleton in `afterEach`.
+
+**Test cases**:
+
+- [ ] `fail-closed when OpenFGA throws on first category-level check` — verify all detected categories are in the returned set
+- [ ] `fail-closed when OpenFGA throws mid-batch after some category checks succeed` — verifies no partial results are used; all categories denied
+- [ ] `returns empty set when all categories pass category-level check` — mock `check()` to return `true` for category-level calls
+- [ ] `returns empty set when all individual literals pass but no category-level access` — mock category-level `false`, literal-level `true` for each entity
+- [ ] `returns only categories that fail BOTH literal and category checks` — mock both levels `false`; verify only those categories are in the set
+- [ ] `category with one allowed literal marks entire category as allowed` — if any entity in a category passes literal check, the whole category is allowed
+- [ ] `one category allowed, one denied` — mixed results across categories
+- [ ] `groups entities by category and makes exactly one category-level check per unique category` — verify `checkCalls` has exactly one category-level call per unique `entity_group`
+- [ ] `short-circuits on first error — no additional check() calls after throw` — mock error on 2nd category; verify only 1 call was made before error
+- [ ] `handles empty results array` — returns empty set with zero OpenFGA calls
+- [ ] `handles single entity` — verifies correct behavior for n=1
+
+**What to assert**:
+- Return value (`Set<string>` contents)
+- Number of `check()` calls made and their arguments (call counting)
+- That call ordering is: category-level first, then per-literal only if category-level fails
+- That `openfgaAvailable = false` path covers all categories
+
+**Key complexity**: The function groups entities by category and makes **at most one** category-level check per unique category, then makes **per-literal** checks only if the category-level check fails. Tests must verify both the happy path (all allowed/denied) and the mixed-path (some categories allowed, some not). The short-circuit-on-error behavior is especially important to test — on the first `check()` throw, all categories must be denied regardless of prior results.
 
 #### 4.4 `index.ts` Integration Tests (mock OpenFGA + mock classifier)
 
