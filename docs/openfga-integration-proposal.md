@@ -24,9 +24,9 @@ Object:     privacy_category or privacy_category:sha256_hash_of_literal
 
 | Tuple | Meaning |
 |-------|---------|
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:private_email` | Model can view all emails (category-level) |
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-3f2e8d7c4b1a` | Model can view the specific email whose SHA256 is `3f2e8d7c4b1a` |
-| `model:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:private_email` | Model can view all emails (category-level) |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-3f2e8d7c4b1a` | Model can view the specific email whose SHA256 is `3f2e8d7c4b1a` |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
 
 ### SHA256 Hash Computation
 
@@ -80,13 +80,13 @@ function hashLiteral(literal: string): string {
 model
   schema 1.1
 
-type model
+type model_instance
   relations
     define can_view: [privacy_category]
 
 type privacy_category
   relations
-    define can_view: [model]
+    define can_view: [model_instance]
 ```
 
 > **Note**: The object portion of a tuple uses `privacy_category:<category>` for category-level checks and `privacy_category:sha256-<hash>` for specific literal checks. The SHA256 hash is stored directly in the object ID — no special relation type is needed.
@@ -144,7 +144,7 @@ export class OpenFGAClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tuple_key: {
-            user: `model:${request.subject}`,
+            user: `model_instance:${request.subject}`,
             relation: request.relation,
             object: objectId,
           },
@@ -181,7 +181,7 @@ export class OpenFGAClient {
                 objectId = `privacy_category:${t.object}`;
               }
               return {
-                user: `model:${t.subject}`,
+                user: `model_instance:${t.subject}`,
                 relation: t.relation,
                 object: objectId,
               };
@@ -277,8 +277,8 @@ curl -X POST http://localhost:28080/stores/privacy-policies/write \
   -d '{
     "writes": {
       "tuple_keys": [
-        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:private_email"},
-        {"user": "model:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:sha256-3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e"}
+        {"user": "model_instance:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:private_email"},
+        {"user": "model_instance:mlx-community/MiniMax-M2.7-8bit", "relation": "can_view", "object": "privacy_category:sha256-3f2e8d7c4b1a9f0e2d6c8b4a1f3e2d9c8b4a1f3e"}
       ]
     }
   }'
@@ -298,8 +298,8 @@ For each detected PII entity, the extension computes the SHA256 hash locally and
 
 | PII Entity | SHA256 Hash (truncated) | OpenFGA Check | Result |
 |------------|-------------------------|---------------|--------|
-| `admin@company.com` (email) | `3f2e8d7c4b1a...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-3f2e8d7c4b1a...)` | **allowed** → not masked |
-| `user@company.com` (email) | `7c8b4a1f3e2d...` | `check(model:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-7c8b4a1f3e2d...)` | **denied** → masked as `[EMAIL REDACTED]` |
+| `admin@company.com` (email) | `3f2e8d7c4b1a...` | `check(model_instance:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-3f2e8d7c4b1a...)` | **allowed** → not masked |
+| `user@company.com` (email) | `7c8b4a1f3e2d...` | `check(model_instance:mlx-community/MiniMax-M2.7-8bit, can_view, privacy_category:sha256-7c8b4a1f3e2d...)` | **denied** → masked as `[EMAIL REDACTED]` |
 
 The category-level check (`privacy_category:private_email`) is also performed as a fallback — if the model has category-level access, any literal under that category is allowed.
 
@@ -332,11 +332,11 @@ The category-level check (`privacy_category:private_email`) is also performed as
   - [x] `check(request)` — POST to `/stores/{storeId}/check`, hash literal if provided, return `boolean`
   - [x] `writeTuples(tuples)` — POST to `/stores/{storeId}/write`, hash literals before writing
   - [x] `readTuples(filter?)` — GET from `/stores/{storeId}/read`, optional filter by tuple_key
-- [x] Add `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, `OPENFGA_MODEL_ID`, `PRIVACY_FILTER_MODEL_SUBJECT` env var handling with defaults
+- [x] Add `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, `OPENFGA_MODEL_ID` env var handling with defaults
 - [x] Handle errors gracefully — throw on non-2xx responses from OpenFGA
 - [x] Export `OpenFGAClient` and `hashLiteral` for testing
 
-  > Added: `deleteTuples()` for completeness, `getOpenFGAClient()` singleton helper, Bearer token auth support via `OPENFGA_API_TOKEN` env var.
+  > Added: `deleteTuples()` for completeness, `getOpenFGAClient()` singleton helper, Bearer token auth support via `OPENFGA_API_TOKEN` env var. Note: model subject is not read from an env var — it is sourced from `ctx.model?.id` at runtime in `index.ts`.
 
 ### Phase 2: Integration (`index.ts`) — ✅ DONE
 
@@ -344,8 +344,8 @@ The category-level check (`privacy_category:private_email`) is also performed as
 - [x] Initialize client with env vars in extension setup (lazy init on first use)
 - [x] In `before_agent_start` handler:
   - [x] After PII detection via `classifier(text)`
-  - [x] For each detected entity, call both `openfga.check({ subject: modelSubject, relation: 'can_view', literal: entity.word })` and `openfga.check({ subject: modelSubject, relation: 'can_view', object: entity.entity_group })`
-  - [x] Build `deniedCategories` set (categories where neither literal nor category check passes)
+  - [x] For each detected entity, check category-level first (one call per unique category), then individual literals only if category check fails
+  - [x] Build `deniedCategories` set (categories where both literal and category checks fail or throw)
   - [x] Apply `maskPII()` only to entities in `deniedCategories`
   - [x] If OpenFGA is unreachable, default to masking all PII (fail-closed)
 - [x] In `context` handler:
@@ -356,11 +356,7 @@ The category-level check (`privacy_category:private_email`) is also performed as
 
 ### Phase 3: Configuration & Documentation — ✅ DONE
 
-- [x] Add `docker-compose.yaml` for local OpenFGA:
-  - [x] Service: `openfga` with image `openfga/openfga:latest`
-  - [x] Ports: `28080:8080` (API), `3000:3000` (Playground)
-  - [x] Environment: `OPENFGA_LOG_LEVEL=debug`, `OPENFGA_STORE_DATA_DIR=/var/lib/openfga`
-  - [x] Volume for persistence
+- [x] Add `docker run` commands and/or scripts for local OpenFGA startup (see `scripts/openfga-init.sh`)
 - [x] Add initialization script or curl commands to create store and model on first startup
   - [x] Add tuple management script (`scripts/openfga-tuple.sh`) for grant/revoke/list operations
 - [x] Update README.md:
@@ -372,23 +368,76 @@ The category-level check (`privacy_category:private_email`) is also performed as
 
 ### Phase 4: Testing
 
-- [ ] Write unit tests for `hashLiteral()`:
-  - [ ] Deterministic output for same input
-  - [ ] Different output for different inputs
-  - [ ] Truncation to 40 characters
-- [ ] Write unit tests for `OpenFGAClient`:
-  - [ ] `check()` returns `true` when OpenFGA returns `allowed: true`
-  - [ ] `check()` returns `false` when OpenFGA returns `allowed: false`
-  - [ ] `check()` hashes literal before sending to OpenFGA
-  - [ ] `writeTuples()` hashes literals before writing
-  - [ ] Throws on non-2xx response
-- [ ] Write integration tests for `index.ts` (mock OpenFGA responses):
-  - [ ] PII masked when OpenFGA denies literal and category
-  - [ ] PII not masked when OpenFGA allows category-level access
-  - [ ] PII not masked when OpenFGA allows literal-level access
-  - [ ] All PII masked when OpenFGA is unreachable (fail-closed)
-- [ ] Add mock OpenFGA server using MSW or a simple Express test server
-- [ ] Ensure tests run in CI without requiring a live OpenFGA instance
+#### 4.1 `hashLiteral()` Unit Tests
+
+- [ ] Deterministic output: same input always produces same hash
+- [ ] Different inputs produce different hashes (no collisions on small set)
+- [ ] Output is truncated to exactly 40 hex characters
+- [ ] Empty string produces a valid 40-char hash
+
+#### 4.2 `OpenFGAClient` Unit Tests
+
+Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run without a live OpenFGA server:
+
+**`check()` tests:**
+- [ ] Returns `true` when OpenFGA responds with `allowed: true`
+- [ ] Returns `false` when OpenFGA responds with `allowed: false`
+- [ ] Sends `model_instance:<subject>` as the user field (not `model:<subject>`)
+- [ ] Sends `privacy_category:sha256-<hash>` when `literal` is provided
+- [ ] Sends `privacy_category:<category>` when only `object` is provided
+- [ ] Sends `Bearer <OPENFGA_API_TOKEN>` Authorization header when env var is set
+- [ ] Sends `authorization_model_id` in request body when `modelId` is configured
+- [ ] Throws on non-2xx response (includes status and body in error message)
+- [ ] Handles network errors gracefully (throws descriptive error)
+
+**`writeTuples()` tests:**
+- [ ] Hashes each tuple's `literal` before writing to OpenFGA
+- [ ] Uses category-only object when `object` is provided without `literal`
+- [ ] Sends `model_instance:<subject>` as the user field
+- [ ] Throws on non-2xx response
+
+**`deleteTuples()` tests:**
+- [ ] Same hashing and user field behavior as `writeTuples()`
+- [ ] Sends tuples under the `deletes` key in request body
+- [ ] Throws on non-2xx response
+
+**`readTuples()` tests:**
+- [ ] Builds correct query params when `filter.subject` is provided
+- [ ] Builds correct query params when `filter.relation` is provided
+- [ ] Builds correct query params when `filter.object` is provided (prefixes with `privacy_category:`)
+- [ ] Returns `result.tuples` array from response body
+- [ ] Throws on non-2xx response
+
+#### 4.3 `buildDeniedCategoriesSet()` Unit Tests
+
+- [ ] Returns all detected categories as denied when OpenFGA is unreachable (fail-closed)
+- [ ] Returns empty set when all categories pass category-level check
+- [ ] Returns empty set when all individual literals pass literal-level check
+- [ ] Returns only categories that fail both literal and category checks
+- [ ] Groups entities by category and makes one category-level check per group (not per-entity)
+- [ ] Short-circuits to fail-closed immediately on first OpenFGA error (no unnecessary calls)
+
+#### 4.4 `index.ts` Integration Tests (mock OpenFGA + mock classifier)
+
+Mock both the HuggingFace `pipeline` (token-classification) and the OpenFGA `check()` responses:
+
+- [ ] PII is masked when OpenFGA denies both literal and category (fail-closed for specific entity)
+- [ ] PII is NOT masked when OpenFGA allows category-level access
+- [ ] PII is NOT masked when OpenFGA allows the specific literal
+- [ ] All PII is masked when OpenFGA is unreachable (fail-closed on global error)
+- [ ] Inline `pii-alert` message is sent with correct `MASKED` / `ALLOWED` per entity
+- [ ] `systemPrompt` injection is always present (independent of PII presence)
+- [ ] `context` handler applies same OpenFGA logic to historical messages
+- [ ] `context` handler filters out `pii-alert` custom messages before sending to model
+- [ ] `/check-pii` command sends inline alert with detected PII (no masking, no OpenFGA check)
+- [ ] When `ctx.model?.id` is absent, all detected PII is masked (fail-closed)
+
+#### 4.5 Test Infrastructure
+
+- [ ] Add `test/support/openfga-mock.ts` — exports a `createMockOpenFGAClient()` that records calls and returns configurable responses, implementing the same interface as `OpenFGAClient`
+- [ ] Add `test/support/pi-extension-shim.ts` — fake `ExtensionContext` for testing extension registration without a real pi process (see `docs/proposal-extension-integration-tests.md`)
+- [ ] Tests run with `node --experimental-transform-types --import ./test/support/register-loader.mjs --test` (no live OpenFGA or HuggingFace model needed)
+- [ ] All tests pass in headless CI environment
 
 ### Phase 5: Operational Readiness
 
