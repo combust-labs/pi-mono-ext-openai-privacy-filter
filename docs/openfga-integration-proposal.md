@@ -396,10 +396,10 @@ Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run 
 - [x] Sends `model_instance:<subject>` as the user field
 - [x] Throws on non-2xx response
 
-**`deleteTuples()` tests:**
-- [ ] Same hashing and user field behavior as `writeTuples()`
-- [ ] Sends tuples under the `deletes` key in request body
-- [ ] Throws on non-2xx response
+**`deleteTuples()` tests:** — ✅ DONE
+- [x] Same hashing and user field behavior as `writeTuples()`
+- [x] Sends tuples under the `deletes` key in request body
+- [x] Throws on non-2xx response
 
 **`readTuples()` tests:**
 - [ ] Builds correct query params when `filter.subject` is provided
