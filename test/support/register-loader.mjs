@@ -14,8 +14,10 @@
 import { pathToFileURL } from 'node:url';
 import { Module } from 'node:module';
 
-const mockPipelineUrl = pathToFileURL('/code/test/support/mock-pipeline.ts').href;
-const mockPiTuiUrl = pathToFileURL('/code/test/support/mock-pi-tui.ts').href;
+// Derive paths from the current working directory rather than a hardcoded /code/
+const cwd = process.cwd();
+const mockPipelineUrl = pathToFileURL(cwd + '/test/support/mock-pipeline.ts').href;
+const mockPiTuiUrl = pathToFileURL(cwd + '/test/support/mock-pi-tui.ts').href;
 
 Module.registerHooks({
   resolve(specifier, context, nextResolve) {
