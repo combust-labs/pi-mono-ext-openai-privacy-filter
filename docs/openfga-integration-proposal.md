@@ -551,6 +551,60 @@ export function createMockPipeline(): MockPipeline;
 - [x] Tests run with `node --import tsx --test` (tsx handles TypeScript transpilation; no live OpenFGA or HuggingFace model needed)
 - [x] All tests pass in headless CI environment
 
+#### 4.6 GitHub CI Integration
+
+**Implementation approach**:
+
+A GitHub Actions workflow runs the test suite on every PR and after every merge to `main`. No external services (OpenFGA, HuggingFace) are required — all tests use mocks.
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+```
+
+**What the workflow does**:
+
+1. **Checkout** the repository code
+2. **Setup Node.js 22** with npm cache for faster installs
+3. **`npm ci`** — install exact dependencies from `package-lock.json`
+4. **`npm test`** — runs `node --import tsx --import ./test/support/register-loader.mjs --test` (all 87+ tests, no live services needed)
+
+**Failure handling**:
+
+- If any test fails, the PR check fails and cannot be merged
+- After a merge to `main`, a failing test run triggers a notification (configure via GitHub repository settings → Notifications)
+- The workflow does **not** deploy or release — it is test-only
+
+**Secrets**:
+
+- No secrets are required; tests mock all external services
+- If real OpenFGA integration tests are added in the future, `OPENFGA_API_URL`, `OPENFGA_API_TOKEN`, and `OPENFGA_STORE_ID` would be added as repository secrets and passed via `env` in the workflow
+
+**Extending later**:
+
+- Add `npm run build` step if a compilation step is added
+- Add `npm run check` (lint/type-check) as a separate job
+- Add a job that publishes coverage reports on merge to `main`
+- Add a job that runs real OpenFGA integration tests against a live server (skipped in PRs unless explicitly requested)
+
 ### Phase 5: Operational Readiness
 
 - [ ] Add health check: verify OpenFGA server is reachable before first authorization check
