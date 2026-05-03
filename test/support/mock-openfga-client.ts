@@ -53,10 +53,10 @@ export function createMockOpenFGAClient(): MockOpenFGAClient {
   let error: Error | null = null;
   const calls: RecordedCall[] = [];
 
-  function buildResolvedObjectId(request: CheckRequest): string {
+  async function buildResolvedObjectId(request: CheckRequest): Promise<string> {
     if (request.literal) {
       // Mirrors OpenFGAClient.buildObjectId — hash the literal
-      const { createHash } = require('crypto') as typeof import('crypto');
+      const { createHash } = await import('crypto');
       const hash = createHash('sha256').update(request.literal).digest('hex').substring(0, 40);
       return `privacy_category:sha256-${hash}`;
     }
@@ -67,7 +67,7 @@ export function createMockOpenFGAClient(): MockOpenFGAClient {
   }
 
   async function check(request: CheckRequest): Promise<boolean> {
-    const resolvedObjectId = buildResolvedObjectId(request);
+    const resolvedObjectId = await buildResolvedObjectId(request);
     calls.push({
       subject: request.subject,
       relation: request.relation,

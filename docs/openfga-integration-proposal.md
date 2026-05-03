@@ -442,17 +442,16 @@ Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run 
 
 **Test cases**:
 
-- [ ] `fail-closed when OpenFGA throws on first category-level check` — verify all detected categories are in the returned set
-- [ ] `fail-closed when OpenFGA throws mid-batch after some category checks succeed` — verifies no partial results are used; all categories denied
-- [ ] `returns empty set when all categories pass category-level check` — mock `check()` to return `true` for category-level calls
-- [ ] `returns empty set when all individual literals pass but no category-level access` — mock category-level `false`, literal-level `true` for each entity
-- [ ] `returns only categories that fail BOTH literal and category checks` — mock both levels `false`; verify only those categories are in the set
-- [ ] `category with one allowed literal marks entire category as allowed` — if any entity in a category passes literal check, the whole category is allowed
-- [ ] `one category allowed, one denied` — mixed results across categories
-- [ ] `groups entities by category and makes exactly one category-level check per unique category` — verify `checkCalls` has exactly one category-level call per unique `entity_group`
-- [ ] `short-circuits on first error — no additional check() calls after throw` — mock error on 2nd category; verify only 1 call was made before error
-- [ ] `handles empty results array` — returns empty set with zero OpenFGA calls
-- [ ] `handles single entity` — verifies correct behavior for n=1
+- [x] `fail-closed when OpenFGA throws on first category-level check` — verify all detected categories are in the returned set
+- [x] `fail-closed when OpenFGA throws mid-batch after some category checks succeed` — verifies no partial results are used; all categories denied
+- [x] `returns empty set when all categories pass category-level check` — mock `check()` to return `true` for category-level calls
+- [x] `returns empty set when all individual literals pass but no category-level access` — mock category-level `false`, literal-level `true` for each entity
+- [x] `returns only categories that fail BOTH literal and category checks` — mock both levels `false`; verify only those categories are in the set
+- [x] `one category allowed, one denied` — mixed results across categories
+- [x] `groups entities by category and makes exactly one category-level check per unique category` — verify `checkCalls` has exactly one category-level call per unique `entity_group`
+- [x] `short-circuits on first error — no additional check() calls after throw` — mock error on 2nd category; verify only 1 call was made before error
+- [x] `handles empty results array` — returns empty set with zero OpenFGA calls
+- [x] `handles single entity` — verifies correct behavior for n=1
 
 **What to assert**:
 - Return value (`Set<string>` contents)
@@ -460,7 +459,7 @@ Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run 
 - That call ordering is: category-level first, then per-literal only if category-level fails
 - That `openfgaAvailable = false` path covers all categories
 
-**Key complexity**: The function groups entities by category and makes **at most one** category-level check per unique category, then makes **per-literal** checks only if the category-level check fails. Tests must verify both the happy path (all allowed/denied) and the mixed-path (some categories allowed, some not). The short-circuit-on-error behavior is especially important to test — on the first `check()` throw, all categories must be denied regardless of prior results.
+**Key complexity**: The function groups entities by category and makes **at most one** category-level check per unique category. If the category-level check fails, it then checks each literal under that category individually. If **any** literal passes, the category is allowed. Only if the category-level fails AND all literals fail is the category denied. Tests must verify the happy path (all allowed/denied) and the mixed-path (some categories allowed, some not). The fail-closed behavior on error is especially important to test — on the first `check()` throw, all categories must be denied regardless of prior results.
 
 #### 4.4 `index.ts` Integration Tests (mock OpenFGA + mock classifier)
 
@@ -479,10 +478,10 @@ Mock both the HuggingFace `pipeline` (token-classification) and the OpenFGA `che
 
 #### 4.5 Test Infrastructure
 
-- [ ] Add `test/support/openfga-mock.ts` — exports a `createMockOpenFGAClient()` that records calls and returns configurable responses, implementing the same interface as `OpenFGAClient`
+- [x] Add `test/support/mock-openfga-client.ts` — exports a `createMockOpenFGAClient()` that records calls and returns configurable responses, implementing the same interface as `OpenFGAClient`
 - [ ] Add `test/support/pi-extension-shim.ts` — fake `ExtensionContext` for testing extension registration without a real pi process (see `docs/proposal-extension-integration-tests.md`)
 - [x] Tests run with `node --import tsx --test` (tsx handles TypeScript transpilation; no live OpenFGA or HuggingFace model needed)
-- [ ] All tests pass in headless CI environment
+- [x] All tests pass in headless CI environment
 
 ### Phase 5: Operational Readiness
 
