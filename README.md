@@ -22,7 +22,9 @@ All PII detection capabilities are derived directly from the [OpenAI Privacy Fil
 - **Configurable model path**: Set `PRIVACY_FILTER_MODEL_PATH` to use a local model
 - **Configurable device**: Toggle WebGPU acceleration via `PRIVACY_FILTER_WEBGPU`
 - **Message sanitization**: Masks PII in conversation history
-- **On-demand scanning**: `/check-pii <text>` command
+- **On-demand scanning**: `/check-pii <text>` — detect and list PII in text without masking
+- **Authorization inspection**: `/check-pii-auth <text>` — detect PII and show per-entity ALLOWED/MASKED status based on OpenFGA policy
+- **Access dry-run**: `/check-pii-access <model-id> <category|sha256-hash>` — query OpenFGA directly to check if a model can view a category or literal
 
 ## Installation
 
@@ -107,6 +109,14 @@ PRIVACY_FILTER_WEBGPU=true pi -e ./index.ts
 | `private_url` | URLs |
 | `private_date` | Dates (birthdays, etc.) |
 | `secret` | Passwords, API keys, tokens |
+
+### Chat Commands
+
+| Command | Description |
+|---------|-------------|
+| `/check-pii <text>` | Scan text for PII — shows detected entities and categories (no masking, no auth check) |
+| `/check-pii-auth <text>` | Scan text for PII and show per-entity authorization result (ALLOWED via category-level, ALLOWED via literal-level, or MASKED) — requires OpenFGA |
+| `/check-pii-access <model-id> <category>` | Dry-run: query OpenFGA directly to check if `<model-id>` can view `<category>` (e.g. `private_email`) or a specific literal (sha256 hash) — requires OpenFGA |
 
 ## OpenFGA Authorization (Optional)
 
