@@ -276,16 +276,16 @@ export default function piiExtension(pi: ExtensionAPI) {
   });
 
   // Register command to check a model's authorization to a category or literal
-  pi.registerCommand("check", {
+  pi.registerCommand("check-pii-access", {
     description: "Check if a model can view a PII category or specific literal",
     handler: async (args, ctx) => {
       if (!args) {
-        ctx.ui.notify("Usage: /check <model-id> <category|sha256-hash>", "warning");
+        ctx.ui.notify("Usage: /check-pii-access <model-id> <category|sha256-hash>", "warning");
         return;
       }
       const parts = args.trim().split(/\s+/);
       if (parts.length < 2) {
-        ctx.ui.notify("Usage: /check <model-id> <category|sha256-hash>", "warning");
+        ctx.ui.notify("Usage: /check-pii-access <model-id> <category|sha256-hash>", "warning");
         return;
       }
       const [modelId, target] = parts;
