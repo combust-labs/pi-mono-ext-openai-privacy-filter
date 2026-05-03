@@ -215,7 +215,7 @@ function maskPII(text: string, pii: AggregatedAnnotation[]): string {
  * @param results - PII entities detected by the classifier
  * @param modelSubject - The model ID from pi-mono's current context (e.g. "mlx-community/MiniMax-M2.7-8bit")
  */
-async function buildDeniedCategoriesSet(
+export async function buildDeniedCategoriesSet(
   results: AggregatedAnnotation[],
   modelSubject: string,
 ): Promise<Set<string>> {

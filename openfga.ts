@@ -239,6 +239,10 @@ export class OpenFGAClient {
 
 let _defaultClient: OpenFGAClient | null = null;
 
+/**
+ * Returns the global OpenFGA client instance, creating it lazily if needed.
+ * Tests may override this via `setOpenFGAClient()`.
+ */
 export function getOpenFGAClient(): OpenFGAClient {
   if (!_defaultClient) {
     _defaultClient = new OpenFGAClient({
@@ -248,4 +252,12 @@ export function getOpenFGAClient(): OpenFGAClient {
     });
   }
   return _defaultClient;
+}
+
+/**
+ * Override the global OpenFGA client (for testing only).
+ * Pass `null` to reset to the lazy-initialized real client.
+ */
+export function setOpenFGAClient(client: OpenFGAClient | null): void {
+  _defaultClient = client;
 }
