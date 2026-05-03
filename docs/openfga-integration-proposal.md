@@ -569,9 +569,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
