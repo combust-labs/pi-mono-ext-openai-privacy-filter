@@ -610,7 +610,7 @@ jobs:
 
 - [x] Add `/check-pii-auth` debug command — inspects OpenFGA authorization state per category and literal for detected PII, shows ALLOWED/MASKED per entity
 - [x] Add `/check-pii-access` dry-run command — checks if a model can view a category or specific literal directly via OpenFGA (see Tuple Management section)
-- [ ] Add health check: verify OpenFGA server is reachable before first authorization check
+- [x] Add health check: verify OpenFGA server is reachable before first authorization check
 - [ ] Add metrics/logging for:
   - [ ] Number of PII entities detected per prompt
   - [ ] Authorization decisions (allowed/denied) per category
