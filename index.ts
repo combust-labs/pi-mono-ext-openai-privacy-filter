@@ -308,9 +308,8 @@ export default function piiExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const objectId = target.startsWith('sha256-')
-        ? `privacy_category:${target}`
-        : `privacy_category:${target}`;
+      // Pass raw target — buildObjectId() in openfga.ts adds the privacy_category: prefix
+      const objectId = target;
 
       let allowed: boolean;
       try {
