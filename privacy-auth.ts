@@ -7,6 +7,15 @@
  */
 
 import { getOpenFGAClient } from './openfga.ts';
+import {
+  logCategoryAllowed,
+  logCategoryDenied,
+  logLiteralAllowed,
+  logLiteralDenied,
+  logAuthError,
+  logFailClosed,
+  logHealthCheckFailed,
+} from './privacy-logger.ts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,6 +61,10 @@ export async function buildDeniedCategoriesSet(
 
   // Health check once before any authorization calls — fail fast if OpenFGA is down
   if (!(await openfga.healthCheck())) {
+    logHealthCheckFailed('OpenFGA health check failed — fail-closing all categories');
+    // Log fail-closed for each category
+    const allCategories = [...categoryEntities.keys()];
+    logFailClosed(modelSubject, 'health_check_failed', allCategories);
     openfgaAvailable = false;
   }
 
@@ -67,8 +80,12 @@ export async function buildDeniedCategoriesSet(
       });
       if (canViewCategory) {
         categoryAllowed = true;
+        logCategoryAllowed(modelSubject, category);
+      } else {
+        logCategoryDenied(modelSubject, category);
       }
-    } catch {
+    } catch (err) {
+      logAuthError(modelSubject, category, undefined, (err as Error).message);
       // OpenFGA unavailable — fail closed
       openfgaAvailable = false;
       break;
@@ -78,6 +95,7 @@ export async function buildDeniedCategoriesSet(
 
     // Check each literal under this category individually
     for (const entity of entities) {
+      if (!openfgaAvailable) break;
       try {
         const canViewLiteral = await openfga.check({
           subject: modelSubject,
@@ -86,9 +104,13 @@ export async function buildDeniedCategoriesSet(
         });
         if (canViewLiteral) {
           categoryAllowed = true;
+          logLiteralAllowed(modelSubject, category, entity.word);
           break;
+        } else {
+          logLiteralDenied(modelSubject, category, entity.word);
         }
-      } catch {
+      } catch (err) {
+        logAuthError(modelSubject, category, entity.word, (err as Error).message);
         // OpenFGA unavailable — fail closed
         openfgaAvailable = false;
         break;
@@ -104,6 +126,8 @@ export async function buildDeniedCategoriesSet(
 
   // Fail-closed: if OpenFGA was unreachable, mask everything
   if (!openfgaAvailable) {
+    const allCategories = [...categoryEntities.keys()];
+    logFailClosed(modelSubject, 'openfga_unreachable', allCategories);
     for (const category of categoryEntities.keys()) {
       deniedCategories.add(category);
     }

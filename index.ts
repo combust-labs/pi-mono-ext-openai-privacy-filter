@@ -6,6 +6,7 @@ import { Box, Text } from '@mariozechner/pi-tui';
 
 import { getOpenFGAClient } from './openfga.ts';
 import { buildDeniedCategoriesSet, type AggregatedAnnotation } from './privacy-auth.ts';
+import { logHealthCheckFailed, logAuthError } from './privacy-logger.ts';
 
 const DEFAULT_MODELS_PATH = "~/.cache/huggingface/hub/"
 const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS_PATH;
@@ -210,13 +211,11 @@ export default function piiExtension(pi: ExtensionAPI) {
       const openfga = getOpenFGAClient();
 
       if (!(await openfga.healthCheck())) {
+        logHealthCheckFailed('OpenFGA unreachable — /check-pii-auth cannot proceed');
         ctx.ui.notify('OpenFGA unreachable — cannot check authorization', 'error');
         return;
       }
-
       const piiLines: string[] = [];
-
-      // Group entities by category
       const categoryEntities = new Map<string, AggregatedAnnotation[]>();
       for (const entity of results) {
         if (!categoryEntities.has(entity.entity_group)) {
@@ -299,6 +298,7 @@ export default function piiExtension(pi: ExtensionAPI) {
       const openfga = getOpenFGAClient();
 
       if (!(await openfga.healthCheck())) {
+        logHealthCheckFailed('OpenFGA unreachable — /check-pii-access cannot proceed');
         ctx.ui.notify('OpenFGA unreachable — cannot check access', 'error');
         return;
       }
@@ -315,6 +315,7 @@ export default function piiExtension(pi: ExtensionAPI) {
           object: objectId,
         });
       } catch (err) {
+        logAuthError(modelId, target, undefined, (err as Error).message);
         ctx.ui.notify(`OpenFGA error: ${(err as Error).message}`, 'error');
         return;
       }

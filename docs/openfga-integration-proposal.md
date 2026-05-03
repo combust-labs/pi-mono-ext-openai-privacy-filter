@@ -612,7 +612,7 @@ jobs:
 - [x] Add `/check-pii-access` dry-run command — checks if a model can view a category or specific literal directly via OpenFGA (see Tuple Management section)
 - [x] Add health check: verify OpenFGA server is reachable before first authorization check
 - [ ] Add metrics: number of PII entities detected per prompt, authorization decisions per category, OpenFGA latency, fail-closed events
-- [ ] Add logging: all authorization decisions, errors, and fallbacks (audit trail)
+- [x] Add logging: all authorization decisions, errors, and fallbacks (audit trail)
 - [x] Document tuple management: how to grant/revoke model access to categories and specific literals
 - [x] Add example curl commands for common admin operations (grant category, grant specific literal, revoke)
 
