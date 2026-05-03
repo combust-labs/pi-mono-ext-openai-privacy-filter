@@ -247,6 +247,9 @@ If OpenFGA is unreachable or returns an error, the extension **fail-closes** —
 |--------|-------------|
 | `scripts/openfga-init.sh` | Create OpenFGA store and authorization model |
 | `scripts/openfga-tuple.sh` | Grant/revoke model access to categories or specific literals |
+| `/check-pii-access` | Chat command: dry-run authorization check without writing tuples |
+
+The `/check-pii-access` command (e.g. `/check-pii-access mlx-community/MiniMax-M2.7-8bit private_email`) is the quickest way to verify a model's access from within the chat, without needing curl or the shell script.
 
 Usage:
 ```bash
@@ -284,7 +287,8 @@ Error: OpenFGA check failed (404):
 - Verify `OPENFGA_STORE_ID` is set correctly
 
 **All PII is being masked despite authorization**
-- Check tuples: `./scripts/openfga-tuple.sh list "model-id"`
+- Use `/check-pii-access <model-id> <category>` from the chat to verify directly
+- Or check tuples: `./scripts/openfga-tuple.sh list "model-id"`
 - Verify the model ID matches exactly (including version suffix if present)
 - Ensure the object format is correct: `privacy_category:<category>` or `privacy_category:sha256-<hash>`
 
