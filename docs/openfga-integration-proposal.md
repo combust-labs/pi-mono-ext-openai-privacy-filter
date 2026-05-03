@@ -733,10 +733,17 @@ curl -s "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/read?user=model_instance:mlx-
   -H "Authorization: Bearer $OPENFGA_API_TOKEN" | python3 -m json.tool
 ```
 
-**Check authorization (dry-run)**:
+**Check authorization (dry-run)** — three ways to check:
 
 ```bash
-# Check category-level
+# Via the extension command (from within the chat):
+/check-pii-access mlx-community/MiniMax-M2.7-8bit private_email
+/check-pii-access mlx-community/MiniMax-M2.7-8bit sha256-3f2e8d7c...
+
+# Via the shell script:
+./scripts/openfga-tuple.sh check "mlx-community/MiniMax-M2.7-8bit" private_email
+
+# Via curl directly:
 curl -s -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/check" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
