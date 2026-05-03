@@ -275,6 +275,46 @@ export default function piiExtension(pi: ExtensionAPI) {
     },
   });
 
+  // Register command to check a model's authorization to a category or literal
+  pi.registerCommand("check", {
+    description: "Check if a model can view a PII category or specific literal",
+    handler: async (args, ctx) => {
+      if (!args) {
+        ctx.ui.notify("Usage: /check <model-id> <category|sha256-hash>", "warning");
+        return;
+      }
+      const parts = args.trim().split(/\s+/);
+      if (parts.length < 2) {
+        ctx.ui.notify("Usage: /check <model-id> <category|sha256-hash>", "warning");
+        return;
+      }
+      const [modelId, target] = parts;
+
+      const openfga = getOpenFGAClient();
+      const objectId = target.startsWith('sha256-')
+        ? `privacy_category:${target}`
+        : `privacy_category:${target}`;
+
+      let allowed: boolean;
+      try {
+        allowed = await openfga.check({
+          subject: modelId,
+          relation: 'can_view',
+          object: objectId,
+        });
+      } catch (err) {
+        ctx.ui.notify(`OpenFGA error: ${(err as Error).message}`, 'error');
+        return;
+      }
+
+      if (allowed) {
+        ctx.ui.notify(`✓ ALLOWED — ${modelId} can_view ${target}`, 'info');
+      } else {
+        ctx.ui.notify(`✗ DENIED — ${modelId} cannot view ${target}`, 'warning');
+      }
+    },
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("Privacy Filter extension loaded", "info");
   });

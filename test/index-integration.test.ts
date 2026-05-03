@@ -467,3 +467,91 @@ describe('/check-pii-auth command', () => {
     assert.strictEqual(notifiedType, 'warning');
   });
 });
+
+// ---------------------------------------------------------------------------
+// /check command tests
+// ---------------------------------------------------------------------------
+
+describe('/check command', () => {
+  let importCounter = 4000;
+
+  it('shows ALLOWED when check returns true', async () => {
+    mockOpenFGA.checkResult(true);
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    let notifiedMessage = '';
+    let notifiedType = '';
+    shim.ctx.ui.notify = (msg, type) => { notifiedMessage = msg; notifiedType = type; };
+
+    await shim.invokeCommand('check', 'mlx-community/MiniMax-M2.7-8bit email');
+
+    assert.ok(notifiedMessage.includes('ALLOWED'));
+    assert.strictEqual(notifiedType, 'info');
+  });
+
+  it('shows DENIED when check returns false', async () => {
+    mockOpenFGA.checkResult(false);
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    let notifiedMessage = '';
+    let notifiedType = '';
+    shim.ctx.ui.notify = (msg, type) => { notifiedMessage = msg; notifiedType = type; };
+
+    await shim.invokeCommand('check', 'mlx-community/MiniMax-M2.7-8bit email');
+
+    assert.ok(notifiedMessage.includes('DENIED'));
+    assert.strictEqual(notifiedType, 'warning');
+  });
+
+  it('shows ALLOWED for sha256-hash literal', async () => {
+    mockOpenFGA.checkResult(true);
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    let notifiedMessage = '';
+    shim.ctx.ui.notify = (msg) => { notifiedMessage = msg; };
+
+    await shim.invokeCommand('check', 'mlx-community/MiniMax-M2.7-8bit sha256-3f2e8d7c');
+
+    assert.ok(notifiedMessage.includes('ALLOWED'));
+    assert.ok(notifiedMessage.includes('sha256-3f2e8d7c'));
+  });
+
+  it('notifies error when OpenFGA throws', async () => {
+    mockOpenFGA.throwError(new Error('Connection refused'));
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    let notifiedMessage = '';
+    let notifiedType = '';
+    shim.ctx.ui.notify = (msg, type) => { notifiedMessage = msg; notifiedType = type; };
+
+    await shim.invokeCommand('check', 'mlx-community/MiniMax-M2.7-8bit email');
+
+    assert.ok(notifiedMessage.includes('OpenFGA error'));
+    assert.strictEqual(notifiedType, 'error');
+  });
+
+  it('notifies warning on missing args', async () => {
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    let notifiedMessage = '';
+    let notifiedType = '';
+    shim.ctx.ui.notify = (msg, type) => { notifiedMessage = msg; notifiedType = type; };
+
+    await shim.invokeCommand('check', '');
+    assert.strictEqual(notifiedMessage, 'Usage: /check <model-id> <category|sha256-hash>');
+    assert.strictEqual(notifiedType, 'warning');
+
+    await shim.invokeCommand('check', 'only-model');
+    assert.strictEqual(notifiedMessage, 'Usage: /check <model-id> <category|sha256-hash>');
+    assert.strictEqual(notifiedType, 'warning');
+  });
+});
