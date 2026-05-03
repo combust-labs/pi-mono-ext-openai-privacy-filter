@@ -30,12 +30,12 @@ describe('privacy-logger', () => {
 
   beforeEach(() => {
     events = [];
+    setLoggingEnabled(true); // Ensure logging is enabled for tests
     setLogger((event) => events.push(event));
   });
 
   afterEach(() => {
     resetLogger();
-    setLoggingEnabled(true);
   });
 
   // -------------------------------------------------------------------------

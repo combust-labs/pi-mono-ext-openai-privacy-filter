@@ -77,7 +77,7 @@ function defaultLogger(event: LogEvent): void {
 // ---------------------------------------------------------------------------
 
 let _logger: LoggerFn = defaultLogger;
-let _enabled = true;
+let _enabled = false;
 
 /**
  * Set a custom logger function.
@@ -92,7 +92,7 @@ export function setLogger(fn: LoggerFn): void {
  */
 export function resetLogger(): void {
   _logger = defaultLogger;
-  _enabled = true;
+  _enabled = false;
 }
 
 /**
