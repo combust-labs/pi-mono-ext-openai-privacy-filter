@@ -614,9 +614,173 @@ jobs:
   - [ ] Authorization decisions (allowed/denied) per category
   - [ ] OpenFGA latency
   - [ ] Errors and fallbacks (fail-closed events)
-- [ ] Document tuple management: how to grant/revoke model access to categories and specific literals
-- [ ] Add example curl commands for common admin operations (grant category, grant specific literal, revoke)
+- [x] Document tuple management: how to grant/revoke model access to categories and specific literals
+- [x] Add example curl commands for common admin operations (grant category, grant specific literal, revoke)
 - [x] Add `/check-pii-auth` debug command — inspects OpenFGA authorization state per category and literal for detected PII, shows ALLOWED/MASKED per entity
+
+---
+
+## Tuple Management
+
+Authorization tuples encode which models are allowed to view which PII categories or specific literals. The store never holds plaintext PII — only SHA256 hashes of specific literals.
+
+### Prerequisites
+
+```bash
+export OPENFGA_API_URL="http://localhost:28080"
+export OPENFGA_STORE_ID="<your-store-id>"
+export OPENFGA_MODEL_ID="<your-model-id>"
+export OPENFGA_API_TOKEN="<your-token>"   # optional, if auth enabled
+```
+
+### Data Model
+
+| Type | Description |
+|------|-------------|
+| `model_instance` | A model (e.g. `mlx-community/MiniMax-M2.7-8bit`) |
+| `privacy_category` | A PII category: `email`, `phone_number`, `address`, `name`, `secret`, etc. |
+
+Tuples use the `can_view` relation from `model_instance` → `privacy_category`.
+
+### Common Operations (curl)
+
+**Grant category-level access** — model can view all PII of a given category:
+
+```bash
+curl -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/write" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
+  -d '{
+    "writes": {
+      "tuple_keys": [{
+        "user": "model_instance:mlx-community/MiniMax-M2.7-8bit",
+        "relation": "can_view",
+        "object": "privacy_category:email"
+      }]
+    }
+  }'
+```
+
+**Grant literal-level access** — model can view a specific PII value (hash of the literal is stored, never the raw value):
+
+```bash
+# Hash the literal first (example: "user@company.com" → sha256 truncated to 40 hex chars)
+LITERAL="user@company.com"
+HASH=$(echo -n "$LITERAL" | shasum -a 256 | cut -c1-40)
+
+curl -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/write" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
+  -d "{
+    \"writes\": {
+      \"tuple_keys\": [{
+        \"user\": \"model_instance:mlx-community/MiniMax-M2.7-8bit\",
+        \"relation\": \"can_view\",
+        \"object\": \"privacy_category:sha256-$HASH\"
+      }]
+    }
+  }"
+```
+
+**Revoke category-level access**:
+
+```bash
+curl -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/write" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
+  -d '{
+    "deletes": {
+      "tuple_keys": [{
+        "user": "model_instance:mlx-community/MiniMax-M2.7-8bit",
+        "relation": "can_view",
+        "object": "privacy_category:email"
+      }]
+    }
+  }'
+```
+
+**Revoke literal-level access**:
+
+```bash
+curl -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/write" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
+  -d "{
+    \"deletes\": {
+      \"tuple_keys\": [{
+        \"user\": \"model_instance:mlx-community/MiniMax-M2.7-8bit\",
+        \"relation\": \"can_view\",
+        \"object\": \"privacy_category:sha256-$HASH\"
+      }]
+    }
+  }"
+```
+
+**List all tuples**:
+
+```bash
+curl -s -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/read" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
+  -d '{}' | python3 -m json.tool
+```
+
+**List tuples for a specific model**:
+
+```bash
+curl -s "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/read?user=model_instance:mlx-community/MiniMax-M2.7-8bit" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" | python3 -m json.tool
+```
+
+**Check authorization (dry-run)**:
+
+```bash
+# Check category-level
+curl -s -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/check" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
+  -d '{
+    "tuple_key": {
+      "user": "model_instance:mlx-community/MiniMax-M2.7-8bit",
+      "relation": "can_view",
+      "object": "privacy_category:email"
+    }
+  }' | python3 -m json.tool
+# → {"allowed": true} or {"allowed": false}
+
+# Check literal-level (use sha256 hash of the literal as object)
+curl -s -X POST "$OPENFGA_API_URL/stores/$OPENFGA_STORE_ID/check" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $OPENFGA_API_TOKEN" \
+  -d '{
+    "tuple_key": {
+      "user": "model_instance:mlx-community/MiniMax-M2.7-8bit",
+      "relation": "can_view",
+      "object": "privacy_category:sha256-3f2e8d7c4b1a9f0e2d5c6b8a4e7f1d3c2b5a9687"
+    }
+  }' | python3 -m json.tool
+```
+
+### Shell Script Helper
+
+`scripts/openfga-tuple.sh` wraps these curl commands for convenience:
+
+```bash
+# Grant category-level
+./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" email
+
+# Grant literal-level (provide the raw literal — script hashes it internally)
+./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "user@company.com"
+
+# Revoke
+./scripts/openfga-tuple.sh revoke "mlx-community/MiniMax-M2.7-8bit" email
+
+# List all tuples
+./scripts/openfga-tuple.sh list
+
+# Check a tuple
+./scripts/openfga-tuple.sh check "mlx-community/MiniMax-M2.7-8bit" email
+```
 
 ---
 
