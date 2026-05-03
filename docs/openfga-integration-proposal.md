@@ -465,16 +465,16 @@ Using a mock HTTP handler (e.g., MSW or a simple `fetch` override) so tests run 
 
 Mock both the HuggingFace `pipeline` (token-classification) and the OpenFGA `check()` responses:
 
-- [ ] PII is masked when OpenFGA denies both literal and category (fail-closed for specific entity)
-- [ ] PII is NOT masked when OpenFGA allows category-level access
-- [ ] PII is NOT masked when OpenFGA allows the specific literal
-- [ ] All PII is masked when OpenFGA is unreachable (fail-closed on global error)
-- [ ] Inline `pii-alert` message is sent with correct `MASKED` / `ALLOWED` per entity
-- [ ] `systemPrompt` injection is always present (independent of PII presence)
-- [ ] `context` handler applies same OpenFGA logic to historical messages
-- [ ] `context` handler filters out `pii-alert` custom messages before sending to model
-- [ ] `/check-pii` command sends inline alert with detected PII (no masking, no OpenFGA check)
-- [ ] When `ctx.model?.id` is absent, all detected PII is masked (fail-closed)
+- [x] PII is masked when OpenFGA denies both literal and category (fail-closed for specific entity)
+- [x] PII is NOT masked when OpenFGA allows category-level access
+- [x] PII is NOT masked when OpenFGA allows the specific literal
+- [x] All PII is masked when OpenFGA is unreachable (fail-closed on global error)
+- [x] Inline `pii-alert` message is sent with correct `MASKED` / `ALLOWED` per entity
+- [x] `systemPrompt` injection is always present (independent of PII presence)
+- [x] `context` handler applies same OpenFGA logic to historical messages
+- [x] `context` handler filters out `pii-alert` custom messages before sending to model
+- [x] `/check-pii` command sends inline alert with detected PII (no masking, no OpenFGA check)
+- [x] When `ctx.model?.id` is absent, all detected PII is masked (fail-closed)
 
 **Implementation approach**:
 
@@ -547,7 +547,7 @@ export function createMockPipeline(): MockPipeline;
 #### 4.5 Test Infrastructure
 
 - [x] Add `test/support/mock-openfga-client.ts` — exports a `createMockOpenFGAClient()` that records calls and returns configurable responses, implementing the same interface as `OpenFGAClient`
-- [ ] Add `test/support/pi-extension-shim.ts` — fake `ExtensionContext` for testing extension registration without a real pi process (see `docs/proposal-extension-integration-tests.md`)
+- [x] Add `test/support/pi-extension-shim.ts` — fake `ExtensionAPI` for testing extension handlers, message renderers, and commands (see Section 4.4)
 - [x] Tests run with `node --import tsx --test` (tsx handles TypeScript transpilation; no live OpenFGA or HuggingFace model needed)
 - [x] All tests pass in headless CI environment
 
