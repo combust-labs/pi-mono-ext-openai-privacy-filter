@@ -88,6 +88,12 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 | `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID |
 | `OPENFGA_MODEL_ID` | `privacy-model` | OpenFGA authorization model ID |
 | `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
+| `METRICS_ENABLED` | _(empty)_ | Enable OTLP/Prometheus metrics push (`true`) — requires an endpoint to be set |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | _(empty)_ | OTLP HTTP endpoint for metrics (e.g. `http://collector:4318/v1/metrics`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | Fallback OTLP endpoint if `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is not set |
+| `PUSHGATEWAY_URL` | _(empty)_ | Prometheus Pushgateway URL (e.g. `http://pushgateway:9091`) — auto-detected by `/metrics` path |
+| `METRICS_JOB` | `pii-extension` | Job name used when pushing to Pushgateway |
+| `METRICS_PUSH_INTERVAL_MS` | `30000` | Interval between metric pushes in milliseconds |
 
 ### WebGPU Note
 
@@ -117,6 +123,36 @@ PRIVACY_FILTER_WEBGPU=true pi -e ./index.ts
 | `/check-pii <text>` | Scan text for PII — shows detected entities and categories (no masking, no auth check) |
 | `/check-pii-auth <text>` | Scan text for PII and show per-entity authorization result (ALLOWED via category-level, ALLOWED via literal-level, or MASKED) — requires OpenFGA |
 | `/check-pii-access <model-id> <category>` | Dry-run: query OpenFGA directly to check if `<model-id>` can view `<category>` (e.g. `private_email`) or a specific literal (sha256 hash) — requires OpenFGA |
+
+### Metrics
+
+When `METRICS_ENABLED=true` and an OTLP or Pushgateway endpoint is configured, the extension pushes metrics to an observability backend:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `pii_entities_detected` | counter | PII entities found per prompt |
+| `auth_decisions_allowed` | counter | Category or literal checks that returned allowed (labeled by level, model, category) |
+| `auth_decisions_denied` | counter | Category or literal checks that returned denied (labeled by level, model, category) |
+| `auth_errors` | counter | OpenFGA check() calls that threw (labeled by model, category) |
+| `fail_closed_events` | counter | Invocations where all categories were masked due to OpenFGA being unreachable (labeled by reason, model) |
+| `openfga_check_duration_ms` | histogram | Latency of each OpenFGA check call |
+
+Push to an **OTEL Collector** (e.g. Grafana, Datadog, Honeycomb):
+```bash
+METRICS_ENABLED=true \
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://collector:4318/v1/metrics \
+pi -e ./index.ts
+```
+
+Push to a **Prometheus Pushgateway** (e.g. Prometheus + Grafana):
+```bash
+METRICS_ENABLED=true \
+PUSHGATEWAY_URL=http://pushgateway:9091 \
+METRICS_JOB=pii-extension \
+pi -e ./index.ts
+```
+
+Metrics are pushed every 30 seconds by default (configurable via `METRICS_PUSH_INTERVAL_MS`).
 
 ## OpenFGA Authorization (Optional)
 
