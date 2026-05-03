@@ -476,6 +476,74 @@ Mock both the HuggingFace `pipeline` (token-classification) and the OpenFGA `che
 - [ ] `/check-pii` command sends inline alert with detected PII (no masking, no OpenFGA check)
 - [ ] When `ctx.model?.id` is absent, all detected PII is masked (fail-closed)
 
+**Implementation approach**:
+
+The integration tests require a shim that mimics the pi coding agent's `ExtensionAPI` and a mock for the HuggingFace `pipeline`. Both existing mocks (`test/support/mock-openfga-client.ts`, `test/support/fetch-mock.ts`) are reused.
+
+```typescript
+// test/support/pi-extension-shim.ts
+// Provides a fake ExtensionAPI that captures sendMessage calls,
+// registers message renderers/commands, and lets us invoke
+// before_agent_start and context handlers directly.
+
+export interface ShimExtensionAPI {
+  api: ExtensionAPI;
+  sentMessages: Array<{ customType?: string; content: string; display: boolean }>;
+  registeredRenderers: Map<string, Function>;
+  registeredCommands: Map<string, { description: string; handler: Function }>;
+  reset(): void;
+}
+
+export function createShimExtensionAPI(): ShimExtensionAPI;
+```
+
+```typescript
+// test/support/mock-pipeline.ts
+// Mocks the @huggingface/transformers pipeline for token-classification.
+// Returns configurable PII detection results.
+
+export interface MockPipeline {
+  mockResults: AggregatedAnnotation[];
+  shouldThrow: boolean;
+}
+export function createMockPipeline(): MockPipeline;
+```
+
+**Test structure** (`test/index-integration.test.ts`):
+
+1. **Setup**: Import `piiExtension`, install pipeline mock, install OpenFGA mock, create shim API
+2. **before_agent_start tests**: Call the handler with a mock event/ctx, verify:
+   - Return value contains modified `prompt` (masked or original)
+   - Return value contains `systemPrompt` with injection
+   - `sendMessage` was called with `pii-alert` custom message
+3. **context handler tests**: Call the handler with mock event/ctx containing messages, verify:
+   - PII in user messages is masked/allowed based on OpenFGA
+   - `pii-alert` messages are filtered out of returned messages
+4. **Command tests**: Invoke `/check-pii` handler directly, verify no masking occurs
+
+**Prerequisites to implement**:
+
+1. **`test/support/pi-extension-shim.ts`** — Shim `ExtensionAPI` with:
+   - `registerMessageRenderer(id, renderer)` — records renderers for later inspection
+   - `registerCommand(name, config, handler)` — records commands for direct invocation
+   - `on(event, handler)` — records event handlers; provides a `triggerEvent(name, event, ctx)` helper to invoke them
+   - `sendMessage(msg)` — records sent messages for assertion
+   - `ctx` mock object with `model?.id` (configurable) and `ui.notify()` (records calls)
+
+2. **`test/support/mock-pipeline.ts`** — Mock `pipeline` function:
+   - Intercepts calls to `@huggingface/transformers` pipeline
+   - Returns configurable `AggregatedAnnotation[]` results
+   - Can be set to throw (simulate model load failure)
+   - Uses `beforeEach`/`afterEach` to install/uninstall via `Module._registerHook` or similar
+
+3. **In `test/index-integration.test.ts`**:
+   - Import `piiExtension` and call it with shim API to register handlers
+   - For each test case, configure mock pipeline results + mock OpenFGA responses
+   - Trigger `before_agent_start` or `context` handlers via shim's `triggerEvent()`
+   - Assert on returned prompt, systemPrompt, sent messages
+
+**Key complexity**: The `context` handler must filter out `pii-alert` custom messages before processing — this prevents recursive masking of alerts generated in earlier turns. Tests must verify both the filtering (messages absent from output) and the masking of remaining user message content.
+
 #### 4.5 Test Infrastructure
 
 - [x] Add `test/support/mock-openfga-client.ts` — exports a `createMockOpenFGAClient()` that records calls and returns configurable responses, implementing the same interface as `OpenFGAClient`
