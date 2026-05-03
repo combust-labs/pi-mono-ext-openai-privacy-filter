@@ -616,7 +616,7 @@ jobs:
   - [ ] Errors and fallbacks (fail-closed events)
 - [ ] Document tuple management: how to grant/revoke model access to categories and specific literals
 - [ ] Add example curl commands for common admin operations (grant category, grant specific literal, revoke)
-- [ ] Consider adding a `/check-auth` debug command (similar to `/check-pii`) to inspect authorization state
+- [x] Add `/check-pii-auth` debug command — inspects OpenFGA authorization state per category and literal for detected PII, shows ALLOWED/MASKED per entity
 
 ---
 

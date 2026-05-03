@@ -184,6 +184,97 @@ export default function piiExtension(pi: ExtensionAPI) {
     },
   });
 
+  // Register command to inspect OpenFGA authorization state for detected PII
+  pi.registerCommand("check-pii-auth", {
+    description: "Inspect OpenFGA authorization state for PII in text",
+    handler: async (args, ctx) => {
+      if (!args) {
+        ctx.ui.notify("Usage: /check-pii-auth <text>", "warning");
+        return;
+      }
+
+      const modelSubject = ctx.model?.id;
+      if (!modelSubject) {
+        ctx.ui.notify("No model configured — all PII would be masked", "warning");
+        return;
+      }
+
+      const classifier = await initPipeline();
+      const results = await classifier(args, { aggregation_strategy: "simple" });
+
+      if (results.length === 0) {
+        ctx.ui.notify("No PII detected", "info");
+        return;
+      }
+
+      const openfga = getOpenFGAClient();
+      const piiLines: string[] = [];
+
+      // Group entities by category
+      const categoryEntities = new Map<string, AggregatedAnnotation[]>();
+      for (const entity of results) {
+        if (!categoryEntities.has(entity.entity_group)) {
+          categoryEntities.set(entity.entity_group, []);
+        }
+        categoryEntities.get(entity.entity_group)!.push(entity);
+      }
+
+      for (const [category, entities] of categoryEntities) {
+        let categoryAllowed = false;
+
+        // Category-level check first
+        try {
+          categoryAllowed = await openfga.check({
+            subject: modelSubject,
+            relation: "can_view",
+            object: category,
+          });
+        } catch {
+          // OpenFGA unavailable — fail closed for this category
+          piiLines.push(`  [${category.toUpperCase()}] (category) → MASKED (OpenFGA unavailable)`);
+          continue;
+        }
+
+        if (categoryAllowed) {
+          piiLines.push(`  [${category.toUpperCase()}] (category) → ALLOWED`);
+          for (const entity of entities) {
+            piiLines.push(`    "${entity.word}" → ALLOWED (category-level)`);
+          }
+          continue;
+        }
+
+        // Category-level failed — check each literal individually
+        piiLines.push(`  [${category.toUpperCase()}] (category) → MASKED`);
+        for (const entity of entities) {
+          let literalAllowed = false;
+          try {
+            literalAllowed = await openfga.check({
+              subject: modelSubject,
+              relation: "can_view",
+              literal: entity.word,
+            });
+          } catch {
+            // OpenFGA unavailable — fail closed for this literal
+            piiLines.push(`    "${entity.word}" → MASKED (OpenFGA unavailable)`);
+            continue;
+          }
+          if (literalAllowed) {
+            piiLines.push(`    "${entity.word}" → ALLOWED (literal-level)`);
+          } else {
+            piiLines.push(`    "${entity.word}" → MASKED (literal-level)`);
+          }
+        }
+      }
+
+      const allTypes = [...new Set(results.map(e => e.entity_group))];
+      pi.sendMessage({
+        customType: "pii-alert",
+        content: JSON.stringify({ piiTypes: allTypes, piiLines }),
+        display: true,
+      });
+    },
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("Privacy Filter extension loaded", "info");
   });
