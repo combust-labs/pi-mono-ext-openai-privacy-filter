@@ -381,3 +381,89 @@ describe('/check-pii command', () => {
     assert.strictEqual(notifiedType, 'warning');
   });
 });
+
+// ---------------------------------------------------------------------------
+// /check-pii-auth command tests
+// ---------------------------------------------------------------------------
+
+describe('/check-pii-auth command', () => {
+  let importCounter = 3000;
+
+  it('shows ALLOWED when category-level check passes', async () => {
+    mockPipeline.mockResults([makeEntity('email', 'a@b.com')]);
+    mockOpenFGA.checkResultFn(call => {
+      if (call.resolvedObjectId === 'privacy_category:email') return true;
+      return false;
+    });
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    await shim.invokeCommand('check-pii-auth', 'My email is a@b.com');
+
+    assert.strictEqual(shim.sentMessages.length, 1);
+    const data = JSON.parse(shim.sentMessages[0].content);
+    assert.ok(data.piiLines.some((l: string) => l.includes('ALLOWED')), 'should show ALLOWED');
+    assert.ok(data.piiLines.some((l: string) => l.includes('category-level')), 'should show category-level');
+  });
+
+  it('shows MASKED when category-level fails and literal-level also fails', async () => {
+    mockPipeline.mockResults([makeEntity('email', 'a@b.com')]);
+    mockOpenFGA.checkResult(false); // deny all
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    await shim.invokeCommand('check-pii-auth', 'My email is a@b.com');
+
+    assert.strictEqual(shim.sentMessages.length, 1);
+    const data = JSON.parse(shim.sentMessages[0].content);
+    assert.ok(data.piiLines.some((l: string) => l.includes('MASKED')), 'should show MASKED');
+  });
+
+  it('shows ALLOWED (literal-level) when category-level fails but literal passes', async () => {
+    mockPipeline.mockResults([makeEntity('email', 'a@b.com')]);
+    mockOpenFGA.checkResultFn(call => {
+      if (call.literal === 'a@b.com') return true; // literal-level allows
+      return false; // category-level denies
+    });
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    await shim.invokeCommand('check-pii-auth', 'My email is a@b.com');
+
+    assert.strictEqual(shim.sentMessages.length, 1);
+    const data = JSON.parse(shim.sentMessages[0].content);
+    assert.ok(data.piiLines.some((l: string) => l.includes('ALLOWED (literal-level)')), 'should show literal-level ALLOWED');
+  });
+
+  it('notifies warning when no model is configured (fail-closed)', async () => {
+    mockPipeline.mockResults([makeEntity('email', 'a@b.com')]);
+    shim.ctx.model = null; // no model — fail-closed
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    let notifiedMessage = '';
+    shim.ctx.ui.notify = (msg) => { notifiedMessage = msg; };
+
+    await shim.invokeCommand('check-pii-auth', 'My email is a@b.com');
+
+    assert.strictEqual(notifiedMessage, 'No model configured — all PII would be masked');
+  });
+
+  it('notifies warning on empty args', async () => {
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    let notifiedMessage = '';
+    let notifiedType = '';
+    shim.ctx.ui.notify = (msg, type) => { notifiedMessage = msg; notifiedType = type; };
+
+    await shim.invokeCommand('check-pii-auth', '');
+
+    assert.strictEqual(notifiedMessage, 'Usage: /check-pii-auth <text>');
+    assert.strictEqual(notifiedType, 'warning');
+  });
+});
