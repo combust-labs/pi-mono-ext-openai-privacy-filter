@@ -555,7 +555,7 @@ export function createMockPipeline(): MockPipeline;
 
 **Implementation approach**:
 
-A GitHub Actions workflow runs the test suite on every PR and after every merge to `main`. No external services (OpenFGA, HuggingFace) are required — all tests use mocks.
+A GitHub Actions workflow runs the test suite on every PR (to any branch) and after every merge to `main`. No external services (OpenFGA, HuggingFace) are required — all tests use mocks.
 
 ```yaml
 # .github/workflows/ci.yml
