@@ -16,6 +16,13 @@ import {
   logFailClosed,
   logHealthCheckFailed,
 } from './privacy-logger.ts';
+import {
+  recordAuthAllowed,
+  recordAuthDenied,
+  recordAuthError,
+  recordCheckDuration,
+  recordFailClosed,
+} from './privacy-metrics.ts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,6 +72,7 @@ export async function buildDeniedCategoriesSet(
     // Log fail-closed for each category
     const allCategories = [...categoryEntities.keys()];
     logFailClosed(modelSubject, 'health_check_failed', allCategories);
+    recordFailClosed('health_check_failed', modelSubject);
     openfgaAvailable = false;
   }
 
@@ -73,19 +81,24 @@ export async function buildDeniedCategoriesSet(
     let categoryAllowed = false;
     // Try category-level check first (more efficient — one check covers all literals)
     try {
+      const t0 = Date.now();
       const canViewCategory = await openfga.check({
         subject: modelSubject,
         relation: "can_view",
         object: category,
       });
+      recordCheckDuration(Date.now() - t0);
       if (canViewCategory) {
         categoryAllowed = true;
         logCategoryAllowed(modelSubject, category);
+        recordAuthAllowed('category', modelSubject, category);
       } else {
         logCategoryDenied(modelSubject, category);
+        recordAuthDenied('category', modelSubject, category);
       }
     } catch (err) {
       logAuthError(modelSubject, category, undefined, (err as Error).message);
+      recordAuthError(modelSubject, category);
       // OpenFGA unavailable — fail closed
       openfgaAvailable = false;
       break;
@@ -97,20 +110,25 @@ export async function buildDeniedCategoriesSet(
     for (const entity of entities) {
       if (!openfgaAvailable) break;
       try {
+        const t0 = Date.now();
         const canViewLiteral = await openfga.check({
           subject: modelSubject,
           relation: "can_view",
           literal: entity.word,
         });
+        recordCheckDuration(Date.now() - t0);
         if (canViewLiteral) {
           categoryAllowed = true;
           logLiteralAllowed(modelSubject, category, entity.word);
+          recordAuthAllowed('literal', modelSubject, category);
           break;
         } else {
           logLiteralDenied(modelSubject, category, entity.word);
+          recordAuthDenied('literal', modelSubject, category);
         }
       } catch (err) {
         logAuthError(modelSubject, category, entity.word, (err as Error).message);
+        recordAuthError(modelSubject, category);
         // OpenFGA unavailable — fail closed
         openfgaAvailable = false;
         break;
@@ -128,6 +146,7 @@ export async function buildDeniedCategoriesSet(
   if (!openfgaAvailable) {
     const allCategories = [...categoryEntities.keys()];
     logFailClosed(modelSubject, 'openfga_unreachable', allCategories);
+    recordFailClosed('openfga_unreachable', modelSubject);
     for (const category of categoryEntities.keys()) {
       deniedCategories.add(category);
     }

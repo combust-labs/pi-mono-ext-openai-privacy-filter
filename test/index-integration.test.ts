@@ -24,6 +24,11 @@ import { createMockPipeline } from './support/mock-pipeline.ts';
 import { createMockOpenFGAClient, type MockOpenFGAClient } from './support/mock-openfga-client.ts';
 import { setOpenFGAClient } from '../openfga.ts';
 import type { AggregatedAnnotation } from '../privacy-auth.ts';
+import {
+  setCaptureCallback,
+  resetMetrics,
+  type MetricSnapshot,
+} from '../privacy-metrics.ts';
 
 function makeEntity(group: string, word: string, score = 0.99): AggregatedAnnotation {
   return { entity_group: group, score, word };
@@ -67,6 +72,8 @@ beforeEach(() => {
   shim.reset();
   mockOpenFGA.reset();
   mockPipeline.reset();
+  resetMetrics();
+  setCaptureCallback(null);
   mockOpenFGA.checkResult(false); // default: deny everything (fail-closed)
 });
 
@@ -79,6 +86,9 @@ describe('before_agent_start', () => {
   let importCounter = 0;
 
   it('masks PII when OpenFGA denies both literal and category (fail-closed)', async () => {
+    const capturedMetrics: MetricSnapshot[] = [];
+    setCaptureCallback(m => capturedMetrics.push(...m));
+
     mockPipeline.mockResults([
       makeEntity('email', 'user@company.com'),
       makeEntity('phone_number', '555-123-4567'),
@@ -100,9 +110,35 @@ describe('before_agent_start', () => {
       result!.systemPrompt!.includes('[PRIVACY NOTICE]'),
       'systemPrompt should include privacy injection'
     );
+
+    // Metrics: pii count, auth decisions recorded (fail_closed only on OpenFGA unreachable)
+    const piiCounter = capturedMetrics.find(
+      m => m.type === 'counter' && m.name === 'pii_entities_detected',
+    );
+    assert.ok(piiCounter, 'pii_entities_detected counter should be present');
+    assert.strictEqual((piiCounter as { value: number }).value, 2, 'should count 2 PII entities');
+
+    // fail_closed_events is NOT recorded when checks return false — only when OpenFGA is unreachable
+    const failClosed = capturedMetrics.filter(
+      m => m.type === 'counter' && m.name === 'fail_closed_events',
+    );
+    assert.strictEqual(failClosed.length, 0, 'fail_closed_events only recorded when OpenFGA is unreachable');
+
+    const authDenied = capturedMetrics.filter(
+      m => m.type === 'counter' && m.name === 'auth_decisions_denied',
+    );
+    assert.ok(authDenied.length > 0, 'auth_decisions_denied should be recorded for category-level checks');
+
+    const authAllowed = capturedMetrics.filter(
+      m => m.type === 'counter' && m.name === 'auth_decisions_allowed',
+    );
+    assert.strictEqual(authAllowed.length, 0, 'no allowed decisions when all checks return false');
   });
 
   it('does NOT mask PII when OpenFGA allows category-level access', async () => {
+    const capturedMetrics: MetricSnapshot[] = [];
+    setCaptureCallback(m => capturedMetrics.push(...m));
+
     mockPipeline.mockResults([makeEntity('email', 'user@company.com')]);
     // Category-level check passes
     mockOpenFGA.checkResultFn(call => {
@@ -120,6 +156,18 @@ describe('before_agent_start', () => {
 
     assert.ok(result, 'handler should return a result');
     assert.strictEqual(result!.prompt!, 'My email is user@company.com', 'email should NOT be masked');
+
+    // Metrics: pii count and auth allowed recorded
+    const piiCounter = capturedMetrics.find(
+      m => m.type === 'counter' && m.name === 'pii_entities_detected',
+    );
+    assert.ok(piiCounter, 'pii_entities_detected should be recorded');
+    assert.strictEqual((piiCounter as { value: number }).value, 1);
+
+    const authAllowed = capturedMetrics.filter(
+      m => m.type === 'counter' && m.name === 'auth_decisions_allowed',
+    );
+    assert.ok(authAllowed.length > 0, 'auth_decisions_allowed should be recorded for category-level pass');
   });
 
   it('does NOT mask PII when OpenFGA allows the specific literal', async () => {

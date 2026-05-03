@@ -7,6 +7,7 @@ import { Box, Text } from '@mariozechner/pi-tui';
 import { getOpenFGAClient } from './openfga.ts';
 import { buildDeniedCategoriesSet, type AggregatedAnnotation } from './privacy-auth.ts';
 import { logHealthCheckFailed, logAuthError } from './privacy-logger.ts';
+import { recordPiiDetected, recordFailClosed, startMetrics } from './privacy-metrics.ts';
 
 const DEFAULT_MODELS_PATH = "~/.cache/huggingface/hub/"
 const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS_PATH;
@@ -73,6 +74,8 @@ export default function piiExtension(pi: ExtensionAPI) {
     const results = await classifier(text, { aggregation_strategy: "simple" });
 
     if (results.length === 0) return;
+
+    recordPiiDetected(results.length);
 
     // Use the model currently active in pi-mono as the authorization subject.
     // If no model is set, fail-closed (mask all PII).
@@ -212,6 +215,7 @@ export default function piiExtension(pi: ExtensionAPI) {
 
       if (!(await openfga.healthCheck())) {
         logHealthCheckFailed('OpenFGA unreachable — /check-pii-auth cannot proceed');
+        recordFailClosed('health_check_failed', ctx.model?.id ?? 'unknown');
         ctx.ui.notify('OpenFGA unreachable — cannot check authorization', 'error');
         return;
       }
@@ -299,6 +303,7 @@ export default function piiExtension(pi: ExtensionAPI) {
 
       if (!(await openfga.healthCheck())) {
         logHealthCheckFailed('OpenFGA unreachable — /check-pii-access cannot proceed');
+        recordFailClosed('health_check_failed', ctx.model?.id ?? 'unknown');
         ctx.ui.notify('OpenFGA unreachable — cannot check access', 'error');
         return;
       }
@@ -331,6 +336,9 @@ export default function piiExtension(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.notify("Privacy Filter extension loaded", "info");
   });
+
+  // Start metrics push to OTEL endpoint if configured
+  startMetrics();
 
 };
 
