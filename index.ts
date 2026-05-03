@@ -208,6 +208,12 @@ export default function piiExtension(pi: ExtensionAPI) {
       }
 
       const openfga = getOpenFGAClient();
+
+      if (!(await openfga.healthCheck())) {
+        ctx.ui.notify('OpenFGA unreachable — cannot check authorization', 'error');
+        return;
+      }
+
       const piiLines: string[] = [];
 
       // Group entities by category
@@ -291,6 +297,12 @@ export default function piiExtension(pi: ExtensionAPI) {
       const [modelId, target] = parts;
 
       const openfga = getOpenFGAClient();
+
+      if (!(await openfga.healthCheck())) {
+        ctx.ui.notify('OpenFGA unreachable — cannot check access', 'error');
+        return;
+      }
+
       const objectId = target.startsWith('sha256-')
         ? `privacy_category:${target}`
         : `privacy_category:${target}`;

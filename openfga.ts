@@ -75,6 +75,22 @@ export class OpenFGAClient {
   constructor(private config: OpenFGAClientConfig) {}
 
   /**
+   * Lightweight health check — verifies the OpenFGA server is reachable.
+   * Returns true if the server responds to /healthz, false otherwise.
+   * Does not throw.
+   */
+  async healthCheck(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.config.apiUrl}/healthz`, {
+        method: 'GET',
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Check whether a subject has a given relation to an object.
    * If request.literal is provided, the literal is hashed before being sent.
    * If request.object is provided (category only), it is used as-is.

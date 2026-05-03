@@ -50,7 +50,13 @@ export async function buildDeniedCategoriesSet(
   const openfga = getOpenFGAClient();
   let openfgaAvailable = true;
 
+  // Health check once before any authorization calls — fail fast if OpenFGA is down
+  if (!(await openfga.healthCheck())) {
+    openfgaAvailable = false;
+  }
+
   for (const [category, entities] of categoryEntities) {
+    if (!openfgaAvailable) break;
     let categoryAllowed = false;
     // Try category-level check first (more efficient — one check covers all literals)
     try {

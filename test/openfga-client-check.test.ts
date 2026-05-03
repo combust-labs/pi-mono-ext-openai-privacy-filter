@@ -225,6 +225,50 @@ describe('OpenFGAClient.check()', () => {
     assert.ok(request!.url.includes('/check'), 'URL should include /check endpoint');
   });
 
+describe('OpenFGAClient.healthCheck()', () => {
+  let fetchMock: ReturnType<typeof createFetchMock>;
+  let client: InstanceType<typeof OpenFGAClient>;
+  const baseConfig = { apiUrl: 'http://localhost:28080', storeId: 'test-store', modelId: 'test-model' };
+
+  beforeEach(async () => {
+    fetchMock = createFetchMock();
+    (globalThis as Record<string, unknown>)['fetch'] = fetchMock.fetchFn;
+    const mod = await import('../openfga.ts');
+    OpenFGAClient = mod.OpenFGAClient;
+    client = new OpenFGAClient(baseConfig);
+  });
+
+  afterEach(() => {
+    fetchMock.reset();
+  });
+
+  it('returns true when /healthz returns 200', async () => {
+    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
+
+    const result = await client.healthCheck();
+
+    assert.strictEqual(result, true);
+    const req = fetchMock.getLastRequest();
+    assert.ok(req!.url.includes('/healthz'), 'should hit /healthz');
+  });
+
+  it('returns false when /healthz returns non-2xx', async () => {
+    fetchMock.mockResponse({ ok: false, status: 503, statusText: 'Service Unavailable', body: {} });
+
+    const result = await client.healthCheck();
+
+    assert.strictEqual(result, false);
+  });
+
+  it('returns false on network error', async () => {
+    fetchMock.mockNetworkError('Connection refused');
+
+    const result = await client.healthCheck();
+
+    assert.strictEqual(result, false);
+  });
+});
+
   it('handles different relation types correctly', async () => {
     fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: { allowed: true } });
 

@@ -37,6 +37,12 @@ export type MockOpenFGAClient = {
    */
   throwError(error: Error): void;
 
+  /**
+   * Configure the healthCheck() result. Call this before tests that
+   * depend on the health check behavior.
+   */
+  healthCheckResult(result: boolean): void;
+
   /** Reset call history and configured behavior between tests. */
   reset(): void;
 
@@ -45,12 +51,16 @@ export type MockOpenFGAClient = {
 
   /** The check() method implementing OpenFGAClient's interface. */
   check(request: CheckRequest): Promise<boolean>;
+
+  /** The healthCheck() method implementing OpenFGAClient's interface. */
+  healthCheck(): Promise<boolean>;
 };
 
 export function createMockOpenFGAClient(): MockOpenFGAClient {
   let fixedResult: boolean | null = null;
   let resultFn: ((call: RecordedCall) => boolean) | null = null;
   let error: Error | null = null;
+  let healthResult: boolean = true; // default: healthy
   const calls: RecordedCall[] = [];
 
   async function buildResolvedObjectId(request: CheckRequest): Promise<string> {
@@ -85,8 +95,13 @@ export function createMockOpenFGAClient(): MockOpenFGAClient {
     return false;
   }
 
+  async function healthCheck(): Promise<boolean> {
+    return healthResult;
+  }
+
   return {
     check,
+    healthCheck,
 
     checkResult(result: boolean) {
       fixedResult = result;
@@ -106,11 +121,16 @@ export function createMockOpenFGAClient(): MockOpenFGAClient {
       resultFn = null;
     },
 
+    healthCheckResult(result: boolean) {
+      healthResult = result;
+    },
+
     reset() {
       calls.length = 0;
       fixedResult = null;
       resultFn = null;
       error = null;
+      healthResult = true;
     },
 
     get calls() {

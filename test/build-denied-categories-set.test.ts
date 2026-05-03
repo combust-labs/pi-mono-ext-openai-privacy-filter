@@ -262,4 +262,20 @@ describe('buildDeniedCategoriesSet()', () => {
       assert.strictEqual(call.relation, 'can_view');
     }
   });
+
+  it('fail-closed immediately when healthCheck fails (no check() calls made)', async () => {
+    // Make healthCheck return false — buildDeniedCategoriesSet should immediately
+    // fail-closed without making any check() calls.
+    mock.healthCheckResult(false);
+
+    const results = [
+      makeEntity('private_email', 'user@company.com'),
+      makeEntity('phone_number', '555-123-4567'),
+    ];
+
+    const denied = await buildDeniedCategoriesSet(results, 'model-1');
+
+    assert.strictEqual(denied.size, 2, 'All categories should be denied');
+    assert.strictEqual(mock.calls.length, 0, 'No check() calls when healthCheck fails');
+  });
 });
