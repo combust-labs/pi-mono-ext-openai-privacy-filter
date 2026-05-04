@@ -11,7 +11,7 @@ Integrate **OpenFGA** (Open Fine-Grained Authorization) as a REST API-driven aut
 ```
 Subject:    mlx-community/MiniMax-M2.7-8bit  (the LLM model)
 Relation:   can_view
-Object:     privacy_category or privacy_category:sha256_hash_of_literal
+Object:     privacy_category or privacy_category:sha256-<hash>
 ```
 
 ### Design Rationale
