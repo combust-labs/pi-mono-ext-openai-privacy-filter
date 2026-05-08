@@ -274,12 +274,14 @@ revoke_share() {
     delete_tuple "${model_id}" "model_instance" "can_share" "${pii_hash}" "pii_instance"
 }
 
-# Set lineage (pii_instance --originates_from--> model_instance)
+# Set lineage (pii_instance --lineage--> model_instance)
+# Note: lineage is defined on both pii_instance and model_instance types
+# to support cross-type checks. OpenFGA may reverse the tuple direction.
 set_lineage() {
     local pii_hash="$1"
     local model_id="$2"
     
-    write_tuple "${pii_hash}" "pii_instance" "originates_from" "${model_id}" "model_instance"
+    write_tuple "${pii_hash}" "pii_instance" "lineage" "${model_id}" "model_instance"
 }
 
 # Remove lineage
@@ -287,15 +289,16 @@ remove_lineage() {
     local pii_hash="$1"
     local model_id="$2"
     
-    delete_tuple "${pii_hash}" "pii_instance" "originates_from" "${model_id}" "model_instance"
+    delete_tuple "${pii_hash}" "pii_instance" "lineage" "${model_id}" "model_instance"
 }
 
-# Grant recipient view permission (pii_instance --can_view--> recipient)
+# Grant recipient view permission (recipient --can_view--> pii_instance)
+# Note: can_view is on recipient type with pii_instance as allowed user type
 grant_view_to_recipient() {
     local pii_hash="$1"
     local recipient_id="$2"
     
-    write_tuple "${pii_hash}" "pii_instance" "can_view" "${recipient_id}" "recipient"
+    write_tuple "${recipient_id}" "recipient" "can_view" "${pii_hash}" "pii_instance"
 }
 
 # Revoke recipient view permission
@@ -303,7 +306,7 @@ revoke_view_from_recipient() {
     local pii_hash="$1"
     local recipient_id="$2"
     
-    delete_tuple "${pii_hash}" "pii_instance" "can_view" "${recipient_id}" "recipient"
+    delete_tuple "${recipient_id}" "recipient" "can_view" "${pii_hash}" "pii_instance"
 }
 
 # Grant trust (recipient --can_receive_from--> model_instance)

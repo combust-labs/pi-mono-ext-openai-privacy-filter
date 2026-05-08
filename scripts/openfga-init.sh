@@ -4,15 +4,17 @@
 # OpenFGA Initialization Script (v2 - with lineage and sharing)
 # Creates the store and authorization model for the Privacy Filter extension.
 #
-# Authorization Model:
-#   model_instance:M --can_view--> pii_instance:P
+# Authorization Model v2 (Corrected):
 #   model_instance:M --can_share--> pii_instance:P
-#   model_instance:M --can_receive--> pii_instance:P
-#   pii_instance:P --originates_from--> model_instance:M
-#   pii_instance:P --can_view--> recipient:R
+#   model_instance:M --can_receive_from--> recipient:R  (trust)
+#   pii_instance:P --lineage--> model_instance:M        (lineage - must be on both types)
+#   pii_instance:P --can_view--> recipient:R            (who can view this PII)
+#   recipient:R --can_view--> pii_instance:P            (recipient can view PII)
 #   pii_instance:P --category--> category:C
 #   category:C --defines--> model_instance:M
-#   recipient:R --can_receive_from--> model_instance:M
+#
+# Key insight: OpenFGA reverses cross-type tuples, so relations used in
+# cross-type checks must be defined on BOTH types with appropriate user types.
 #
 # Usage: ./scripts/openfga-init.sh [--reset]
 #   --reset  Delete existing store and recreate from scratch
@@ -72,10 +74,10 @@ create_store() {
     echo "export OPENFGA_STORE_ID=${STORE_ID}" >> /tmp/openfga_env.sh
 }
 
-# Create the authorization model (v2 with lineage and sharing)
+# Create the authorization model (v2 - corrected for cross-type checks)
 create_model() {
     local model_id
-    log_info "Creating authorization model (v2 - with lineage and sharing)..."
+    log_info "Creating authorization model (v2 - corrected for cross-type checks)..."
     local response
     response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/authorization-models" \
         -H "Content-Type: application/json" \
@@ -93,13 +95,19 @@ create_model() {
                         },
                         "can_receive": {
                             "this": {}
+                        },
+                        "can_receive_from": {
+                            "this": {}
+                        },
+                        "lineage": {
+                            "this": {}
                         }
                     },
                     "metadata": {
                         "relations": {
                             "can_view": {
                                 "directly_related_user_types": [
-                                    { "type": "model_instance" }
+                                    { "type": "pii_instance" }
                                 ]
                             },
                             "can_share": {
@@ -108,6 +116,16 @@ create_model() {
                                 ]
                             },
                             "can_receive": {
+                                "directly_related_user_types": [
+                                    { "type": "pii_instance" }
+                                ]
+                            },
+                            "can_receive_from": {
+                                "directly_related_user_types": [
+                                    { "type": "recipient" }
+                                ]
+                            },
+                            "lineage": {
                                 "directly_related_user_types": [
                                     { "type": "pii_instance" }
                                 ]
@@ -121,7 +139,13 @@ create_model() {
                         "can_view": {
                             "this": {}
                         },
-                        "originates_from": {
+                        "can_share": {
+                            "this": {}
+                        },
+                        "can_receive": {
+                            "this": {}
+                        },
+                        "lineage": {
                             "this": {}
                         },
                         "category": {
@@ -132,17 +156,62 @@ create_model() {
                         "relations": {
                             "can_view": {
                                 "directly_related_user_types": [
-                                    { "type": "recipient" }
+                                    { "type": "recipient" },
+                                    { "type": "pii_instance" }
                                 ]
                             },
-                            "originates_from": {
+                            "can_share": {
                                 "directly_related_user_types": [
                                     { "type": "model_instance" }
+                                ]
+                            },
+                            "can_receive": {
+                                "directly_related_user_types": [
+                                    { "type": "model_instance" }
+                                ]
+                            },
+                            "lineage": {
+                                "directly_related_user_types": [
+                                    { "type": "pii_instance" }
                                 ]
                             },
                             "category": {
                                 "directly_related_user_types": [
                                     { "type": "category" }
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "recipient",
+                    "relations": {
+                        "can_receive": {
+                            "this": {}
+                        },
+                        "can_receive_from": {
+                            "this": {}
+                        },
+                        "can_view": {
+                            "this": {}
+                        }
+                    },
+                    "metadata": {
+                        "relations": {
+                            "can_receive": {
+                                "directly_related_user_types": [
+                                    { "type": "pii_instance" }
+                                ]
+                            },
+                            "can_receive_from": {
+                                "directly_related_user_types": [
+                                    { "type": "model_instance" }
+                                ]
+                            },
+                            "can_view": {
+                                "directly_related_user_types": [
+                                    { "type": "pii_instance" },
+                                    { "type": "recipient" }
                                 ]
                             }
                         }
@@ -158,31 +227,6 @@ create_model() {
                     "metadata": {
                         "relations": {
                             "defines": {
-                                "directly_related_user_types": [
-                                    { "type": "model_instance" }
-                                ]
-                            }
-                        }
-                    }
-                },
-                {
-                    "type": "recipient",
-                    "relations": {
-                        "can_receive": {
-                            "this": {}
-                        },
-                        "can_receive_from": {
-                            "this": {}
-                        }
-                    },
-                    "metadata": {
-                        "relations": {
-                            "can_receive": {
-                                "directly_related_user_types": [
-                                    { "type": "pii_instance" }
-                                ]
-                            },
-                            "can_receive_from": {
                                 "directly_related_user_types": [
                                     { "type": "model_instance" }
                                 ]
@@ -216,7 +260,7 @@ print_env() {
     echo "  export OPENFGA_MODEL_ID=${model_id}"
     echo ""
     echo "========================================"
-    echo "Authorization Model v2"
+    echo "Authorization Model v2 (Corrected)"
     echo "========================================"
     echo ""
     echo "Types:"
@@ -225,24 +269,28 @@ print_env() {
     echo "  - category: A category of PII (email, phone, etc.)"
     echo "  - recipient: A user, harness, or agent that can receive PII"
     echo ""
-    echo "Key Relations:"
-    echo "  - model_instance --can_view--> pii_instance      (input direction)"
+    echo "Key Relations (with cross-type support):"
     echo "  - model_instance --can_share--> pii_instance     (model can share this PII)"
-    echo "  - pii_instance --originates_from--> model_instance (lineage)"
+    echo "  - model_instance --lineage--> pii_instance       (lineage check target)"
+    echo "  - model_instance --can_receive_from--> recipient (trust relationship)"
+    echo "  - pii_instance --lineage--> model_instance       (lineage - pii originates from model)"
     echo "  - pii_instance --can_view--> recipient           (who can view this PII)"
-    echo "  - recipient --can_receive_from--> model_instance (trust relationship)"
+    echo "  - recipient --can_view--> pii_instance           (recipient can view PII)"
+    echo "  - category --defines--> model_instance           (category defines which models produce it)"
     echo ""
-    echo "Example Tuple Commands (new syntax):"
-    echo "  # Grant model access to view PII instance"
-    echo "  ./scripts/openfga-tuple.sh grant-view \"mlx-community/MiniMax-M2.7-8bit\" \"sha256-abc123\""
+    echo "Important: Cross-type relations (lineage, can_view) are defined on BOTH types"
+    echo "to allow OpenFGA's tuple reversal for bidirectional checks."
     echo ""
+    echo "Example Tuple Commands:"
     echo "  # Grant model sharing access to a PII instance"
     echo "  ./scripts/openfga-tuple.sh grant-share \"mlx-community/MiniMax-M2.7-8bit\" \"sha256-abc123\""
     echo ""
     echo "  # Set PII lineage (this PII came from model M)"
+    echo "  # Note: Use pii_instance#lineage@model_instance format"
     echo "  ./scripts/openfga-tuple.sh set-lineage \"sha256-abc123\" \"mlx-community/MiniMax-M2.7-8bit\""
     echo ""
     echo "  # Grant recipient access to view PII instance"
+    echo "  # Note: Use recipient#can_view@pii_instance format"
     echo "  ./scripts/openfga-tuple.sh grant-view-to-recipient \"sha256-abc123\" \"user:alice\""
     echo ""
     echo "  # Establish trust: recipient trusts model"
