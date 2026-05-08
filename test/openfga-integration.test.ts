@@ -81,6 +81,7 @@ async function createModel(storeId: string): Promise<string> {
             can_share: { this: {} },       
             can_receive: { this: {} },     
             can_receive_from: { this: {} }, // which recipients this model trusts
+            lineage: { this: {} },         // lineage relation for checking pii origins (needed for cross-type checks)
           },
           metadata: {
             relations: {
@@ -90,28 +91,30 @@ async function createModel(storeId: string): Promise<string> {
               can_receive: { directly_related_user_types: [{ type: "pii_instance" }] },
               // model_instance receives trust from recipients
               can_receive_from: { directly_related_user_types: [{ type: "recipient" }] },
+              // lineage is on model_instance so pii_instance can check it
+              lineage: { directly_related_user_types: [{ type: "pii_instance" }] },
             },
           },
         },
         { 
           type: "pii_instance", 
           relations: { 
-            can_view: { this: {} },           // who can view this PII
+            can_view: { this: {} },           // who can view this PII (and for pii_instance to be checked)
             can_share: { this: {} },          // who can share this PII
             can_receive: { this: {} },        // who can receive this PII
-            originates_from: { this: {} },    // which model created this
+            lineage: { this: {} },            // which model created this PII (renamed from originates_from to avoid OpenFGA _from suffix reversal)
             category: { this: {} },           // category of this PII
           },
           metadata: {
             relations: {
-              // pii_instance can be viewed by recipients
-              can_view: { directly_related_user_types: [{ type: "recipient" }] },
+              // pii_instance can be viewed by recipients (for check(recipient, can_view, pii))
+              can_view: { directly_related_user_types: [{ type: "recipient" }, { type: "pii_instance" }] },
               // pii_instance can be shared by models
               can_share: { directly_related_user_types: [{ type: "model_instance" }] },
               // pii_instance can be received by models
               can_receive: { directly_related_user_types: [{ type: "model_instance" }] },
-              // pii_instance originates from models
-              originates_from: { directly_related_user_types: [{ type: "model_instance" }] },
+              // pii_instance lineage points to model_instance (user is pii_instance, but cross-type checks need relation on target)
+              lineage: { directly_related_user_types: [{ type: "pii_instance" }] },
               // pii_instance belongs to categories
               category: { directly_related_user_types: [{ type: "category" }] },
             },
@@ -121,11 +124,15 @@ async function createModel(storeId: string): Promise<string> {
           type: "recipient", 
           relations: { 
             can_receive_from: { this: {} },   // which models this recipient trusts
+            can_view: { this: {} },           // can view PII instances
           },
           metadata: {
             relations: {
               // recipient receives trust from models (inverse of model.can_receive_from)
               can_receive_from: { directly_related_user_types: [{ type: "model_instance" }] },
+              // recipient can view pii_instance (user is recipient, object is pii_instance)
+              // Also allow recipient as user type for check(recipient, can_view, pii) to work
+              can_view: { directly_related_user_types: [{ type: "pii_instance" }, { type: "recipient" }] },
             },
           },
         },
@@ -226,15 +233,15 @@ describe('OpenFGA Integration', { skip: !runIntegrationTests }, () => {
     await del(storeId, modelId, [tuple]);
   });
 
-  // Test: pii_instance originates_from model_instance (lineage)
-  // check(model_instance:support-bot, originates_from, pii_instance:xxx)
-  // originates_from is on pii_instance, so model_instance must be allowed user type
-  it('pii_instance originates_from model_instance (lineage)', async () => {
-    // The user field contains the subject (model_instance), object is pii_instance
-    const tuple = { user: 'model_instance:support-bot', relation: 'originates_from', object: piiInstanceId };
+  // Test: pii_instance lineage model_instance (lineage)
+  // check(pii_instance:xxx, lineage, model_instance:support-bot)
+  // lineage is on pii_instance, so pii_instance must be allowed user type
+  it('pii_instance lineage model_instance (lineage)', async () => {
+    // The user field contains the subject (pii_instance), object is model_instance
+    const tuple = { user: piiInstanceId, relation: 'lineage', object: 'model_instance:support-bot' };
     await write(storeId, modelId, [tuple]);
     const allowed = await check(storeId, modelId, tuple.user, tuple.relation, tuple.object);
-    assert.strictEqual(allowed, true, 'PII should originate from model');
+    assert.strictEqual(allowed, true, 'PII should have lineage to model');
     await del(storeId, modelId, [tuple]);
   });
 
@@ -265,17 +272,16 @@ describe('OpenFGA Integration', { skip: !runIntegrationTests }, () => {
   it('complete sharing authorization flow', async () => {
     const tuples = [
       { user: 'model_instance:support-bot', relation: 'can_share', object: piiInstanceId },
-      { user: piiInstanceId, relation: 'originates_from', object: 'model_instance:support-bot' },
-      { user: piiInstanceId, relation: 'can_view', object: 'recipient:alice' },
+      { user: piiInstanceId, relation: 'lineage', object: 'model_instance:support-bot' },
+      { user: 'recipient:alice', relation: 'can_view', object: piiInstanceId },
       { user: 'recipient:alice', relation: 'can_receive_from', object: 'model_instance:support-bot' },
     ];
     await write(storeId, modelId, tuples);
     
     const checks = {
       modelCanShare: await check(storeId, modelId, 'model_instance:support-bot', 'can_share', piiInstanceId),
-      // Lineage: pii_instance originates from model_instance
-      // check(pii_instance, originates_from, model_instance) since originates_from is on pii_instance
-      lineageValid: await check(storeId, modelId, piiInstanceId, 'originates_from', 'model_instance:support-bot'),
+      // Lineage: pii_instance lineage model_instance (pii_instance is user, model is object)
+      lineageValid: await check(storeId, modelId, piiInstanceId, 'lineage', 'model_instance:support-bot'),
       recipientCanView: await check(storeId, modelId, 'recipient:alice', 'can_view', piiInstanceId),
       recipientTrustsModel: await check(storeId, modelId, 'recipient:alice', 'can_receive_from', 'model_instance:support-bot'),
     };
