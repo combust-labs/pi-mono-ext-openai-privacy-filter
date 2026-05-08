@@ -5,7 +5,7 @@
  * Tests cover:
  * - Builds correct query params when filter.subject is provided
  * - Builds correct query params when filter.relation is provided
- * - Builds correct query params when filter.object is provided (prefixes with privacy_category:)
+ * - Builds correct query params when filter.object is provided (prefixes with category:)
  * - Returns result.tuples array from response body
  * - Throws on non-2xx response
  */
@@ -92,7 +92,7 @@ describe('OpenFGAClient.readTuples()', () => {
       'Relation should be set correctly');
   });
 
-  it('builds correct query params when filter.object is provided (prefixes with privacy_category:)', async () => {
+  it('builds correct query params when filter.object is provided (prefixes with category:)', async () => {
     fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: { tuples: [] } });
 
     await client.readTuples({ object: 'private_email' });
@@ -100,8 +100,8 @@ describe('OpenFGAClient.readTuples()', () => {
     const request = fetchMock.getLastRequest();
     assert.ok(request, 'Request was made');
     const url = new URL(request!.url);
-    assert.strictEqual(url.searchParams.get('object'), 'privacy_category:private_email',
-      'Object should be prefixed with privacy_category:');
+    assert.strictEqual(url.searchParams.get('object'), 'category:private_email',
+      'Object should be prefixed with category:');
     assert.ok(!url.searchParams.get('object')!.startsWith('sha256-'),
       'Object should NOT have sha256- prefix when filtering (it is already hashed in writes)');
   });
@@ -120,7 +120,7 @@ describe('OpenFGAClient.readTuples()', () => {
     const url = new URL(request!.url);
     assert.strictEqual(url.searchParams.get('user'), 'model_instance:test-model');
     assert.strictEqual(url.searchParams.get('relation'), 'can_view');
-    assert.strictEqual(url.searchParams.get('object'), 'privacy_category:email');
+    assert.strictEqual(url.searchParams.get('object'), 'category:email');
   });
 
   it('sends correct URL with store ID and /read endpoint', async () => {

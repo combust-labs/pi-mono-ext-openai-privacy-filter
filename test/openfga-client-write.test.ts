@@ -60,12 +60,12 @@ describe('OpenFGAClient.writeTuples()', () => {
 
     // Verify the object is the hashed form
     assert.ok(
-      tupleKeys[0].object.startsWith('privacy_category:sha256-'),
-      `Expected privacy_category:sha256-<hash>, got: ${tupleKeys[0].object}`
+      tupleKeys[0].object.startsWith('pii_instance:sha256-'),
+      `Expected pii_instance:sha256-<hash>, got: ${tupleKeys[0].object}`
     );
 
     // Verify the hash is 40 hex characters
-    const hash = tupleKeys[0].object.replace('privacy_category:sha256-', '');
+    const hash = tupleKeys[0].object.replace('pii_instance:sha256-', '');
     assert.match(hash, /^[0-9a-f]{40}$/, `Expected 40 hex chars, got: ${hash}`);
 
     // Verify the raw literal is NOT in the request (never sent to OpenFGA)
@@ -88,7 +88,7 @@ describe('OpenFGAClient.writeTuples()', () => {
 
     const body = JSON.parse(request!.options.body as string);
     const tupleKeys = body.writes.tuple_keys;
-    assert.strictEqual(tupleKeys[0].object, 'privacy_category:private_email');
+    assert.strictEqual(tupleKeys[0].object, 'category:private_email');
   });
 
   it('sends model_instance:<subject> as the user field', async () => {
@@ -132,15 +132,15 @@ describe('OpenFGAClient.writeTuples()', () => {
 
     // Verify each tuple has correct structure
     assert.strictEqual(tupleKeys[0].user, 'model_instance:model-a');
-    assert.strictEqual(tupleKeys[0].object, 'privacy_category:email');
+    assert.strictEqual(tupleKeys[0].object, 'category:email');
     assert.strictEqual(tupleKeys[0].relation, 'can_view');
 
     assert.strictEqual(tupleKeys[1].user, 'model_instance:model-b');
-    assert.ok(tupleKeys[1].object.startsWith('privacy_category:sha256-'));
+    assert.ok(tupleKeys[1].object.startsWith('pii_instance:sha256-'));
     assert.strictEqual(tupleKeys[1].relation, 'can_view');
 
     assert.strictEqual(tupleKeys[2].user, 'model_instance:model-c');
-    assert.strictEqual(tupleKeys[2].object, 'privacy_category:document');
+    assert.strictEqual(tupleKeys[2].object, 'category:document');
     assert.strictEqual(tupleKeys[2].relation, 'can_edit');
   });
 
@@ -267,8 +267,8 @@ describe('OpenFGAClient.writeTuples()', () => {
     const tupleKeys = body.writes.tuple_keys;
 
     // Should have hashed object
-    assert.ok(tupleKeys[0].object.startsWith('privacy_category:sha256-'));
-    // Should NOT have privacy_category:undefined or similar
+    assert.ok(tupleKeys[0].object.startsWith('pii_instance:sha256-'));
+    // Should NOT have pii_instance:undefined or similar
     assert.ok(!tupleKeys[0].object.includes('undefined'));
   });
 });

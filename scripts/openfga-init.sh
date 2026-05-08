@@ -1,8 +1,18 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# OpenFGA Initialization Script
+# OpenFGA Initialization Script (v2 - with lineage and sharing)
 # Creates the store and authorization model for the Privacy Filter extension.
+#
+# Authorization Model:
+#   model_instance:M --can_view--> pii_instance:P
+#   model_instance:M --can_share--> pii_instance:P
+#   model_instance:M --can_receive--> pii_instance:P
+#   pii_instance:P --originates_from--> model_instance:M
+#   pii_instance:P --can_view--> recipient:R
+#   pii_instance:P --category--> category:C
+#   category:C --defines--> model_instance:M
+#   recipient:R --can_receive_from--> model_instance:M
 #
 # Usage: ./scripts/openfga-init.sh [--reset]
 #   --reset  Delete existing store and recreate from scratch
@@ -62,10 +72,10 @@ create_store() {
     echo "export OPENFGA_STORE_ID=${STORE_ID}" >> /tmp/openfga_env.sh
 }
 
-# Create the authorization model
+# Create the authorization model (v2 with lineage and sharing)
 create_model() {
     local model_id
-    log_info "Creating authorization model..."
+    log_info "Creating authorization model (v2 - with lineage and sharing)..."
     local response
     response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/authorization-models" \
         -H "Content-Type: application/json" \
@@ -77,6 +87,12 @@ create_model() {
                     "relations": {
                         "can_view": {
                             "this": {}
+                        },
+                        "can_share": {
+                            "this": {}
+                        },
+                        "can_receive": {
+                            "this": {}
                         }
                     },
                     "metadata": {
@@ -85,20 +101,88 @@ create_model() {
                                 "directly_related_user_types": [
                                     { "type": "model_instance" }
                                 ]
+                            },
+                            "can_share": {
+                                "directly_related_user_types": [
+                                    { "type": "pii_instance" }
+                                ]
+                            },
+                            "can_receive": {
+                                "directly_related_user_types": [
+                                    { "type": "pii_instance" }
+                                ]
                             }
                         }
                     }
                 },
                 {
-                    "type": "privacy_category",
+                    "type": "pii_instance",
                     "relations": {
                         "can_view": {
+                            "this": {}
+                        },
+                        "originates_from": {
+                            "this": {}
+                        },
+                        "category": {
                             "this": {}
                         }
                     },
                     "metadata": {
                         "relations": {
                             "can_view": {
+                                "directly_related_user_types": [
+                                    { "type": "recipient" }
+                                ]
+                            },
+                            "originates_from": {
+                                "directly_related_user_types": [
+                                    { "type": "model_instance" }
+                                ]
+                            },
+                            "category": {
+                                "directly_related_user_types": [
+                                    { "type": "category" }
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "category",
+                    "relations": {
+                        "defines": {
+                            "this": {}
+                        }
+                    },
+                    "metadata": {
+                        "relations": {
+                            "defines": {
+                                "directly_related_user_types": [
+                                    { "type": "model_instance" }
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    "type": "recipient",
+                    "relations": {
+                        "can_receive": {
+                            "this": {}
+                        },
+                        "can_receive_from": {
+                            "this": {}
+                        }
+                    },
+                    "metadata": {
+                        "relations": {
+                            "can_receive": {
+                                "directly_related_user_types": [
+                                    { "type": "pii_instance" }
+                                ]
+                            },
+                            "can_receive_from": {
                                 "directly_related_user_types": [
                                     { "type": "model_instance" }
                                 ]
@@ -129,18 +213,40 @@ print_env() {
     echo ""
     echo "  export OPENFGA_API_URL=${OPENFGA_API_URL}"
     echo "  export OPENFGA_STORE_ID=${STORE_ID}"
-    echo "  export OPENFGA_MODEL_ID=<your-model-id>"
+    echo "  export OPENFGA_MODEL_ID=${model_id}"
     echo ""
-    echo "To write authorization tuples, use:"
-    echo "  curl -X POST ${OPENFGA_API_URL}/stores/${STORE_ID}/write \\"
-    echo "    -H 'Content-Type: application/json' \\"
-    echo "    -d '{"
-    echo "      \"writes\": {"
-    echo "        \"tuple_keys\": ["
-    echo "          {\"user\": \"model_instance:mlx-community/MiniMax-M2.7-8bit\", \"relation\": \"can_view\", \"object\": \"privacy_category:email\"}"
-    echo "        ]"
-    echo "      }"
-    echo "    }'"
+    echo "========================================"
+    echo "Authorization Model v2"
+    echo "========================================"
+    echo ""
+    echo "Types:"
+    echo "  - model_instance: AI model or agent"
+    echo "  - pii_instance: A specific PII occurrence (identified by SHA256 hash)"
+    echo "  - category: A category of PII (email, phone, etc.)"
+    echo "  - recipient: A user, harness, or agent that can receive PII"
+    echo ""
+    echo "Key Relations:"
+    echo "  - model_instance --can_view--> pii_instance      (input direction)"
+    echo "  - model_instance --can_share--> pii_instance     (model can share this PII)"
+    echo "  - pii_instance --originates_from--> model_instance (lineage)"
+    echo "  - pii_instance --can_view--> recipient           (who can view this PII)"
+    echo "  - recipient --can_receive_from--> model_instance (trust relationship)"
+    echo ""
+    echo "Example Tuple Commands (new syntax):"
+    echo "  # Grant model access to view PII instance"
+    echo "  ./scripts/openfga-tuple.sh grant-view \"mlx-community/MiniMax-M2.7-8bit\" \"sha256-abc123\""
+    echo ""
+    echo "  # Grant model sharing access to a PII instance"
+    echo "  ./scripts/openfga-tuple.sh grant-share \"mlx-community/MiniMax-M2.7-8bit\" \"sha256-abc123\""
+    echo ""
+    echo "  # Set PII lineage (this PII came from model M)"
+    echo "  ./scripts/openfga-tuple.sh set-lineage \"sha256-abc123\" \"mlx-community/MiniMax-M2.7-8bit\""
+    echo ""
+    echo "  # Grant recipient access to view PII instance"
+    echo "  ./scripts/openfga-tuple.sh grant-view-to-recipient \"sha256-abc123\" \"user:alice\""
+    echo ""
+    echo "  # Establish trust: recipient trusts model"
+    echo "  ./scripts/openfga-tuple.sh grant-trust \"user:alice\" \"mlx-community/MiniMax-M2.7-8bit\""
     echo ""
 }
 

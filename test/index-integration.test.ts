@@ -142,7 +142,7 @@ describe('before_agent_start', () => {
     mockPipeline.mockResults([makeEntity('email', 'user@company.com')]);
     // Category-level check passes
     mockOpenFGA.checkResultFn(call => {
-      if (call.resolvedObjectId === 'privacy_category:email') return true;
+      if (call.resolvedObjectId === 'category:email') return true;
       return false;
     });
 
@@ -216,7 +216,7 @@ describe('before_agent_start', () => {
       makeEntity('phone_number', '555-123-4567'),
     ]);
     mockOpenFGA.checkResultFn(call => {
-      if (call.resolvedObjectId === 'privacy_category:email') return true; // category-level allows email
+      if (call.resolvedObjectId === 'category:email') return true; // category-level allows email
       return false; // phone denied
     });
 
@@ -440,7 +440,7 @@ describe('/check-pii-auth command', () => {
   it('shows ALLOWED when category-level check passes', async () => {
     mockPipeline.mockResults([makeEntity('email', 'a@b.com')]);
     mockOpenFGA.checkResultFn(call => {
-      if (call.resolvedObjectId === 'privacy_category:email') return true;
+      if (call.resolvedObjectId === 'category:email') return true;
       return false;
     });
 

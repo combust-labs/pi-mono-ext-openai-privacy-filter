@@ -75,7 +75,7 @@ describe('OpenFGAClient.check()', () => {
     assert.ok(!body.tuple_key.user.startsWith('model:'), 'User field should use model_instance: prefix');
   });
 
-  it('sends privacy_category:sha256-<hash> when literal is provided', async () => {
+  it('sends pii_instance:sha256-<hash> when literal is provided', async () => {
     fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: { allowed: true } });
 
     const literal = 'user@company.com';
@@ -86,11 +86,11 @@ describe('OpenFGAClient.check()', () => {
     const body = JSON.parse(request!.options.body as string);
 
     // Verify the object is the hashed form
-    assert.ok(body.tuple_key.object.startsWith('privacy_category:sha256-'),
-      `Expected privacy_category:sha256-<hash>, got: ${body.tuple_key.object}`);
+    assert.ok(body.tuple_key.object.startsWith('pii_instance:sha256-'),
+      `Expected pii_instance:sha256-<hash>, got: ${body.tuple_key.object}`);
 
     // Verify the hash is 40 hex characters
-    const hash = body.tuple_key.object.replace('privacy_category:sha256-', '');
+    const hash = body.tuple_key.object.replace('pii_instance:sha256-', '');
     assert.match(hash, /^[0-9a-f]{40}$/, `Expected 40 hex chars, got: ${hash}`);
 
     // Verify the literal is NOT in the request (raw literal never sent)
@@ -99,7 +99,7 @@ describe('OpenFGAClient.check()', () => {
       'Raw literal should not be sent to OpenFGA');
   });
 
-  it('sends privacy_category:<category> when only object is provided', async () => {
+  it('sends category:<category> when only object is provided', async () => {
     fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: { allowed: true } });
 
     await client.check({ subject: 'test-model', relation: 'can_view', object: 'private_email' });
@@ -108,10 +108,10 @@ describe('OpenFGAClient.check()', () => {
     assert.ok(request, 'Request was made');
     const body = JSON.parse(request!.options.body as string);
 
-    assert.strictEqual(body.tuple_key.object, 'privacy_category:private_email');
+    assert.strictEqual(body.tuple_key.object, 'category:private_email');
   });
 
-  it('sends privacy_category:<category> when object starts with sha256-', async () => {
+  it('sends pii_instance:<category> when object starts with sha256-', async () => {
     fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: { allowed: true } });
 
     // When object is already a hash (starts with sha256-), it should be wrapped correctly
@@ -121,7 +121,7 @@ describe('OpenFGAClient.check()', () => {
     assert.ok(request, 'Request was made');
     const body = JSON.parse(request!.options.body as string);
 
-    assert.strictEqual(body.tuple_key.object, 'privacy_category:sha256-abc123');
+    assert.strictEqual(body.tuple_key.object, 'pii_instance:sha256-abc123');
   });
 
   it('sends Bearer <OPENFGA_API_TOKEN> Authorization header when env var is set', async () => {
