@@ -1,16 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Phase 6: OpenFGA Real Integration Tests
- *
- * These tests connect to a real OpenFGA instance and perform end-to-end
- * authorization checks. They are gated behind the OPENFGA_INTEGRATION_TEST
- * environment variable and clean up after themselves.
- *
- * Usage:
- *   OPENFGA_INTEGRATION_TEST=true npm test
- *
- * Prerequisites:
- *   - OpenFGA running at http://agent-openfga:8080 (or OPENFGA_API_URL)
+ * OpenFGA Real Integration Tests
+ * 
+ * Key insight from docs: check(user=U, relation=R, object=O) checks if
+ * user U has relation R to object O. The relation R must be defined on type(O).
+ * 
+ * Model structure:
+ * - model_instance: the AI model/agent (principal)
+ * - pii_instance: a specific PII occurrence (resource)  
+ * - recipient: who can receive PII (resource)
+ * - category: PII category (resource)
+ * 
+ * Based on MCP docs pattern: user:role:admin#assignee relation:can_call object:tool:greet
+ * means can_call is defined on tool type. So:
+ * - check(model_instance:X, can_share, pii_instance:Y) requires can_share on pii_instance type
+ * - check(pii_instance:Y, can_view, recipient:Z) requires can_view on recipient type  
+ * - check(recipient:Z, can_receive_from, model_instance:X) requires can_receive_from on model_instance type
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -50,7 +55,6 @@ async function api(path: string, opts: RequestInit = {}): Promise<unknown> {
 }
 
 async function cleanup(): Promise<void> {
-  try { await api('/stores', { method: 'POST', body: JSON.stringify({ name: STORE_NAME + '-cleanup' }) }); } catch { /* ignore */ }
   const stores = await api('/stores') as { stores: Array<{ id: string; name: string }> };
   for (const s of stores.stores) {
     if (s.name.startsWith('privacy-integration-test')) {
@@ -64,6 +68,7 @@ async function createStore(name: string): Promise<string> {
 }
 
 async function createModel(storeId: string): Promise<string> {
+  // Key insight: relation is defined on type(O) where check(user, relation, object) has object of type O
   return (await api(`/stores/${storeId}/authorization-models`, {
     method: 'POST',
     body: JSON.stringify({
@@ -72,37 +77,67 @@ async function createModel(storeId: string): Promise<string> {
         { 
           type: "model_instance", 
           relations: { 
-            can_view: { this: {} }, 
-            can_share: { this: {} },
+            can_view: { this: {} },        
+            can_share: { this: {} },       
+            can_receive: { this: {} },     
+            can_receive_from: { this: {} }, // which recipients this model trusts
           },
           metadata: {
             relations: {
+              // model_instance can be the user when checking can_share/can_view on pii_instance
               can_view: { directly_related_user_types: [{ type: "pii_instance" }] },
               can_share: { directly_related_user_types: [{ type: "pii_instance" }] },
+              can_receive: { directly_related_user_types: [{ type: "pii_instance" }] },
+              // model_instance receives trust from recipients
+              can_receive_from: { directly_related_user_types: [{ type: "recipient" }] },
             },
           },
         },
         { 
           type: "pii_instance", 
           relations: { 
-            can_view: { this: {} }, 
-            originates_from: { this: {} },
+            can_view: { this: {} },           // who can view this PII
+            can_share: { this: {} },          // who can share this PII
+            can_receive: { this: {} },        // who can receive this PII
+            originates_from: { this: {} },    // which model created this
+            category: { this: {} },           // category of this PII
           },
           metadata: {
             relations: {
+              // pii_instance can be viewed by recipients
               can_view: { directly_related_user_types: [{ type: "recipient" }] },
+              // pii_instance can be shared by models
+              can_share: { directly_related_user_types: [{ type: "model_instance" }] },
+              // pii_instance can be received by models
+              can_receive: { directly_related_user_types: [{ type: "model_instance" }] },
+              // pii_instance originates from models
               originates_from: { directly_related_user_types: [{ type: "model_instance" }] },
+              // pii_instance belongs to categories
+              category: { directly_related_user_types: [{ type: "category" }] },
             },
           },
         },
         { 
           type: "recipient", 
           relations: { 
-            can_receive_from: { this: {} },
+            can_receive_from: { this: {} },   // which models this recipient trusts
           },
           metadata: {
             relations: {
+              // recipient receives trust from models (inverse of model.can_receive_from)
               can_receive_from: { directly_related_user_types: [{ type: "model_instance" }] },
+            },
+          },
+        },
+        { 
+          type: "category", 
+          relations: { 
+            defines: { this: {} },            // which models produce this category
+          },
+          metadata: {
+            relations: {
+              // category is defined by models
+              defines: { directly_related_user_types: [{ type: "model_instance" }] },
             },
           },
         },
@@ -112,7 +147,7 @@ async function createModel(storeId: string): Promise<string> {
 }
 
 async function write(storeId: string, modelId: string, tuples: Array<{ user: string; relation: string; object: string }>): Promise<void> {
-  console.log('[WRITE]', JSON.stringify(tuples));
+  console.log('[WRITE]', JSON.stringify(tuples, null, 2));
   await api(`/stores/${storeId}/write`, {
     method: 'POST',
     body: JSON.stringify({ writes: { tuple_keys: tuples }, authorization_model_id: modelId }),
@@ -142,6 +177,7 @@ describe('OpenFGA Integration', { skip: !runIntegrationTests }, () => {
   let storeId: string;
   let modelId: string;
   const emailHash = createHash('sha256').update('test@test.com').digest('hex').substring(0, 40);
+  const piiInstanceId = `pii_instance:sha256-${emailHash}`;
 
   before(async () => {
     console.log('\n[SETUP] Creating store and model...');
@@ -156,58 +192,95 @@ describe('OpenFGA Integration', { skip: !runIntegrationTests }, () => {
     console.log('[DONE]\n');
   });
 
-  it('model_instance can_view pii_instance', async () => {
-    const tuple = { user: 'model_instance:support-bot', relation: 'can_view', object: `pii_instance:sha256-${emailHash}` };
+  // Test: model_instance can_share pii_instance
+  // check(model_instance:support-bot, can_share, pii_instance:xxx)
+  // can_share is on pii_instance, so model_instance must be allowed user type
+  it('model_instance can_share pii_instance', async () => {
+    const tuple = { user: 'model_instance:support-bot', relation: 'can_share', object: piiInstanceId };
     await write(storeId, modelId, [tuple]);
     const allowed = await check(storeId, modelId, tuple.user, tuple.relation, tuple.object);
-    assert.strictEqual(allowed, true);
+    assert.strictEqual(allowed, true, 'Model should be able to share PII instance');
     await del(storeId, modelId, [tuple]);
   });
 
+  // Test: pii_instance can_view recipient
+  // check(recipient:alice, can_view, pii_instance:xxx)
+  // can_view is on pii_instance, so recipient must be allowed user type
   it('pii_instance can_view recipient', async () => {
-    const tuple = { user: `pii_instance:sha256-${emailHash}`, relation: 'can_view', object: 'recipient:user:alice' };
+    // The user field contains the subject (recipient), object is pii_instance
+    const tuple = { user: 'recipient:alice', relation: 'can_view', object: piiInstanceId };
     await write(storeId, modelId, [tuple]);
     const allowed = await check(storeId, modelId, tuple.user, tuple.relation, tuple.object);
-    assert.strictEqual(allowed, true);
+    assert.strictEqual(allowed, true, 'PII instance should be viewable by recipient');
     await del(storeId, modelId, [tuple]);
   });
 
-  it('recipient can_receive_from model_instance', async () => {
-    const tuple = { user: 'recipient:user:alice', relation: 'can_receive_from', object: 'model_instance:support-bot' };
+  // Test: recipient can_receive_from model_instance (trust from recipient perspective)
+  // check(recipient:alice, can_receive_from, model_instance:support-bot)
+  // can_receive_from is on model_instance, so recipient must be allowed user type
+  it('recipient can_receive_from model_instance (trust)', async () => {
+    const tuple = { user: 'recipient:alice', relation: 'can_receive_from', object: 'model_instance:support-bot' };
     await write(storeId, modelId, [tuple]);
     const allowed = await check(storeId, modelId, tuple.user, tuple.relation, tuple.object);
-    assert.strictEqual(allowed, true);
+    assert.strictEqual(allowed, true, 'Recipient should be able to receive from model (trust)');
     await del(storeId, modelId, [tuple]);
   });
 
+  // Test: pii_instance originates_from model_instance (lineage)
+  // check(model_instance:support-bot, originates_from, pii_instance:xxx)
+  // originates_from is on pii_instance, so model_instance must be allowed user type
+  it('pii_instance originates_from model_instance (lineage)', async () => {
+    // The user field contains the subject (model_instance), object is pii_instance
+    const tuple = { user: 'model_instance:support-bot', relation: 'originates_from', object: piiInstanceId };
+    await write(storeId, modelId, [tuple]);
+    const allowed = await check(storeId, modelId, tuple.user, tuple.relation, tuple.object);
+    assert.strictEqual(allowed, true, 'PII should originate from model');
+    await del(storeId, modelId, [tuple]);
+  });
+
+  // Test: category defines model_instance
+  // check(model_instance:scanning-bot, defines, category:email)
+  // defines is on category, so model_instance must be allowed user type
   it('category defines model_instance', async () => {
-    const tuple = { user: 'category:email', relation: 'defines', object: 'model_instance:scanning-bot' };
+    // The user field contains the subject (model_instance), object is category
+    const tuple = { user: 'model_instance:scanning-bot', relation: 'defines', object: 'category:email' };
     await write(storeId, modelId, [tuple]);
     const allowed = await check(storeId, modelId, tuple.user, tuple.relation, tuple.object);
-    assert.strictEqual(allowed, true);
+    assert.strictEqual(allowed, true, 'Category should define model_instance');
     await del(storeId, modelId, [tuple]);
   });
 
+  // Test: denied without tuple
   it('denied without tuple', async () => {
-    const allowed = await check(storeId, modelId, 'model_instance:unknown', 'can_view', `pii_instance:sha256-${emailHash}`);
-    assert.strictEqual(allowed, false);
+    const allowed = await check(storeId, modelId, 'model_instance:unknown', 'can_share', piiInstanceId);
+    assert.strictEqual(allowed, false, 'Should be denied without tuple');
   });
 
-  it('complete sharing flow simulation', async () => {
+  // Test: complete sharing authorization flow (simulating checkShare)
+  // For sharing to be allowed:
+  // 1. model --can_share--> pii  (check model, can_share, pii)
+  // 2. pii --originates_from--> model  (check pii, originates_from, model)
+  // 3. pii --can_view--> recipient  (check pii, can_view, recipient)
+  // 4. recipient --can_receive_from--> model  (check recipient, can_receive_from, model)
+  it('complete sharing authorization flow', async () => {
     const tuples = [
-      { user: 'model_instance:support-bot', relation: 'can_view', object: `pii_instance:sha256-${emailHash}` },
-      { user: `pii_instance:sha256-${emailHash}`, relation: 'can_view', object: 'recipient:user:alice' },
-      { user: 'recipient:user:alice', relation: 'can_receive_from', object: 'model_instance:support-bot' },
+      { user: 'model_instance:support-bot', relation: 'can_share', object: piiInstanceId },
+      { user: piiInstanceId, relation: 'originates_from', object: 'model_instance:support-bot' },
+      { user: piiInstanceId, relation: 'can_view', object: 'recipient:alice' },
+      { user: 'recipient:alice', relation: 'can_receive_from', object: 'model_instance:support-bot' },
     ];
     await write(storeId, modelId, tuples);
     
     const checks = {
-      modelCanView: await check(storeId, modelId, 'model_instance:support-bot', 'can_view', `pii_instance:sha256-${emailHash}`),
-      piiCanBeViewedByRecipient: await check(storeId, modelId, `pii_instance:sha256-${emailHash}`, 'can_view', 'recipient:user:alice'),
-      recipientTrustsModel: await check(storeId, modelId, 'recipient:user:alice', 'can_receive_from', 'model_instance:support-bot'),
+      modelCanShare: await check(storeId, modelId, 'model_instance:support-bot', 'can_share', piiInstanceId),
+      // Lineage: pii_instance originates from model_instance
+      // check(pii_instance, originates_from, model_instance) since originates_from is on pii_instance
+      lineageValid: await check(storeId, modelId, piiInstanceId, 'originates_from', 'model_instance:support-bot'),
+      recipientCanView: await check(storeId, modelId, 'recipient:alice', 'can_view', piiInstanceId),
+      recipientTrustsModel: await check(storeId, modelId, 'recipient:alice', 'can_receive_from', 'model_instance:support-bot'),
     };
     
-    const sharingAllowed = checks.modelCanView && checks.piiCanBeViewedByRecipient && checks.recipientTrustsModel;
+    const sharingAllowed = checks.modelCanShare && checks.lineageValid && checks.recipientCanView && checks.recipientTrustsModel;
     assert.strictEqual(sharingAllowed, true, `All checks should pass: ${JSON.stringify(checks)}`);
     
     await del(storeId, modelId, tuples);
