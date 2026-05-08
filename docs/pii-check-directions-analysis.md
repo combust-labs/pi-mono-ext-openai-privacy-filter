@@ -248,13 +248,87 @@ Output delivered to user
 
 ---
 
+## Current Implementation Status
+
+Based on analysis of `index.ts`, `openfga.ts`, and `privacy-auth.ts`:
+
+### Input Direction (User → LLM) ✅ PARTIALLY IMPLEMENTED
+
+| Event | Status | Implementation Details |
+|-------|--------|------------------------|
+| `input` | ❌ NOT IMPLEMENTED | Raw user input interception not hooked |
+| `before_agent_start` | ✅ IMPLEMENTED | Detects PII, applies `buildDeniedCategoriesSet()` with `can_view` checks, masks prompt, injects system prompt |
+| `context` | ✅ IMPLEMENTED | Scans user messages in history, applies same authorization, filters PII alert messages |
+| `before_provider_request` | ❌ NOT IMPLEMENTED | No final payload validation before LLM call |
+
+**Input Direction Authorization Function:**
+- `buildDeniedCategoriesSet()` in `privacy-auth.ts`
+- Uses: `can_view` relation only
+- Checks: Category-level → Literal-level fallback
+
+### Output Direction (LLM → User) ❌ NOT IMPLEMENTED
+
+| Event | Status | Implementation Details |
+|-------|--------|------------------------|
+| `message_start` | ❌ NOT IMPLEMENTED | No hook for assistant message start |
+| `message_update` | ❌ NOT IMPLEMENTED | No streaming PII detection |
+| `message_end` | ❌ NOT IMPLEMENTED | **This is where output checks SHOULD happen** |
+| `tool_call` | ❌ NOT IMPLEMENTED | No tool call blocking |
+| `tool_result` | ❌ NOT IMPLEMENTED | No tool result modification |
+
+**Available but Not Used:**
+- `buildSharingDeniedCategoriesSet()` exists in `privacy-auth.ts`
+- `checkSharingAuthorization()` exists for per-entity sharing checks
+- `isSharingEnabled()` gating function exists
+- All OpenFGA tuple functions exist in `openfga.ts`
+
+### What's Missing for Output Direction
+
+The extension has all the necessary authorization functions (`buildSharingDeniedCategoriesSet`, `checkSharingAuthorization`) but is missing the event handlers to:
+
+1. **Detect PII** in model's response via `message_end`
+2. **Apply 4-way sharing authorization**:
+   - `model --can_share--> pii_instance`
+   - `pii_instance --lineage--> model`
+   - `recipient --can_view--> pii_instance`
+   - `recipient --can_receive_from--> model`
+3. **Mask PII** if any check fails
+4. **Use environment variables** to gate behavior:
+   - `PRIVACY_FILTER_SHARING_ENABLED=true`
+   - `PRIVACY_FILTER_RECIPIENT_ID=user:alice`
+
+### Code Location Reference
+
+```
+index.ts:
+  ✅ before_agent_start handler (line ~70) - Input PII checks
+  ✅ context handler (line ~130) - Context PII checks
+  ❌ message_end handler - MISSING (output checks should go here)
+  ❌ tool_result handler - MISSING
+
+privacy-auth.ts:
+  ✅ buildDeniedCategoriesSet() - Input direction authorization
+  ✅ buildSharingDeniedCategoriesSet() - Output direction authorization (exists but not called)
+  ✅ checkSharingAuthorization() - Per-entity sharing check (exists but not called)
+  ✅ isSharingEnabled() - Gating function (exists but not used)
+
+openfga.ts:
+  ✅ check() - Basic can_view checks
+  ✅ checkShare() - 4-way sharing authorization
+  ✅ hashLiteral() - Hash function for PII
+  ✅ buildPIIInstanceId() - Build pii_instance object ID
+```
+
+---
+
 ## Recommendations
 
-1. **Input checks** should use `context` event for filtering messages before LLM call
-2. **Output checks** should use `message_end` event for final content validation
-3. **For streaming output**, consider `message_update` for early PII detection but be aware content is incomplete
-4. **OpenFGA authorization** for output direction requires the 4-check model (can_share, lineage, recipient_can_view, recipient_trusts)
-5. **Environment variables** `PRIVACY_FILTER_RECIPIENT_ID` and `PRIVACY_FILTER_SHARING_ENABLED` control output direction behavior
+1. **Input checks** are well implemented via `before_agent_start` and `context`
+2. **Missing `input` event** handler could add early input transformation
+3. **Missing `before_provider_request`** could add final payload validation
+4. **Add `message_end` handler** to implement output direction checks using `buildSharingDeniedCategoriesSet()`
+5. **Use existing `isSharingEnabled()`** to gate output direction checks
+6. **Environment variables** `PRIVACY_FILTER_RECIPIENT_ID` and `PRIVACY_FILTER_SHARING_ENABLED` already exist but aren't wired to output checks
 
 ---
 
