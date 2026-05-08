@@ -5,7 +5,7 @@ import { env, pipeline } from '@huggingface/transformers';
 import { Box, Text } from '@mariozechner/pi-tui';
 
 import { getOpenFGAClient } from './openfga.ts';
-import { buildDeniedCategoriesSet, type AggregatedAnnotation } from './privacy-auth.ts';
+import { buildDeniedCategoriesSet, buildSharingDeniedCategoriesSet, isSharingEnabled, getRecipientId, type AggregatedAnnotation } from './privacy-auth.ts';
 import { logHealthCheckFailed, logAuthError } from './privacy-logger.ts';
 import { recordPiiDetected, recordFailClosed, startMetrics } from './privacy-metrics.ts';
 
@@ -157,7 +157,61 @@ export default function piiExtension(pi: ExtensionAPI) {
       }
     }
     return { messages: filteredMessages };
-  })
+  });
+
+  // Detect and mask PII in model output before sending to user (output direction)
+  pi.on("message_end", async (event, ctx) => {
+    // Only process assistant messages
+    if (event.message.role !== "assistant") return;
+
+    // Check if sharing is enabled
+    if (!isSharingEnabled()) return;
+
+    // Get recipient ID for sharing checks
+    const recipientId = getRecipientId();
+    if (!recipientId) {
+      console.log("[PRIVACY] PRIVACY_FILTER_RECIPIENT_ID not set — cannot perform sharing checks");
+      return;
+    }
+
+    // Extract text content from the message
+    const content = extractText(event.message.content);
+    if (!content || content.trim().length === 0) return;
+
+    // Initialize classifier and detect PII
+    const classifier = await initPipeline();
+    const results = await classifier(content, { aggregation_strategy: "simple" });
+    if (results.length === 0) return;
+
+    // Get model subject for authorization checks
+    const modelSubject = ctx.model?.id;
+    if (!modelSubject) {
+      console.log("[PRIVACY] No model configured — cannot perform sharing checks");
+      return;
+    }
+
+    // Perform 4-way sharing authorization check
+    // Returns set of categories that should be BLOCKED from sharing
+    const deniedCategories = await buildSharingDeniedCategoriesSet(
+      results,
+      modelSubject,
+      recipientId,
+      { checkRecipientTrust: true }
+    );
+
+    // Filter PII results to only those that are denied
+    const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
+    if (piiToMask.length === 0) return;
+
+    // Mask the denied PII and return modified message
+    const maskedContent = maskPII(content, piiToMask);
+    return {
+      message: {
+        ...event.message,
+        content: maskedContent,
+      },
+    };
+  });
 
   // Register command to check text for PII
   pi.registerCommand("check-pii", {
@@ -340,6 +394,15 @@ export default function piiExtension(pi: ExtensionAPI) {
   startMetrics();
 
 };
+
+// Extract text content from a message content array
+function extractText(content: any[]): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((c) => c.type === "text")
+    .map((c) => c.text || "")
+    .join("\n");
+}
 
 // Mask PII in text by replacing with [<entity_group>: REDACTED]
 function maskPII(text: string, pii: AggregatedAnnotation[]): string {
