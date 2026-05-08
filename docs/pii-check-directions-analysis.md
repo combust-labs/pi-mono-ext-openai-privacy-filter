@@ -250,6 +250,28 @@ Some tools (e.g., `read`, `grep`) return results directly displayed to users. If
 | Tool output displayed directly to user | ✅ Yes | Output |
 | Basic model text response filtering | ❌ No | `message_end` sufficient |
 
+### Important Clarification: `context` vs `tool_result`
+
+**You are correct** that in most cases, existing input direction checks cover tool results:
+
+| Scenario | Goes Through `context`? | Which Checks Apply |
+|----------|------------------------|-------------------|
+| Same LLM sees tool result in next turn | ✅ Yes | Input (`can_view` via `buildDeniedCategoriesSet()`) |
+| Tool result displayed to user who called it | ✅ Yes (eventually) | Input (`can_view`) |
+| Tool result displayed to **different** user/agent | ❌ No | Output (`can_share` via `buildSharingDeniedCategoriesSet()`) |
+
+**When `context` covers it (no `tool_result` needed)**:
+- Tool result is added to conversation as a `tool` role message
+- `context` event sees it when LLM makes next call
+- `buildDeniedCategoriesSet()` applies `can_view` checks automatically
+
+**When `tool_result` is needed (different recipient)**:
+- Multi-agent scenarios where Agent A's tool output goes to Agent B or User B
+- The recipient is NOT the same entity that called the tool
+- Output direction checks (`can_share` + lineage) would apply
+
+In short: **if the tool result stays within the same conversation loop, `context` + `before_agent_start` are sufficient. `tool_result` is only needed when crossing to different agents or users.**
+
 ### Implementation Pattern: `tool_result`
 
 ```typescript
