@@ -14,6 +14,7 @@ All PII detection capabilities are derived directly from the [OpenAI Privacy Fil
 - Configurable local model loading
 - Context-aware message sanitization
 - On-demand scanning via chat command
+- **Authorization-based sharing control** (output direction) with lineage tracking
 
 ## Features
 
@@ -25,6 +26,7 @@ All PII detection capabilities are derived directly from the [OpenAI Privacy Fil
 - **On-demand scanning**: `/check-pii <text>` — detect and list PII in text without masking
 - **Authorization inspection**: `/check-pii-auth <text>` — detect PII and show per-entity ALLOWED/MASKED status based on OpenFGA policy
 - **Access dry-run**: `/check-pii-access <model-id> <category|sha256-hash>` — query OpenFGA directly to check if a model can view a category or literal
+- **Sharing authorization**: Control which models can share PII to which recipients with lineage verification
 
 ## Installation
 
@@ -88,6 +90,8 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 | `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID |
 | `OPENFGA_MODEL_ID` | `privacy-model` | OpenFGA authorization model ID |
 | `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
+| `PRIVACY_FILTER_RECIPIENT_ID` | _(empty)_ | Recipient ID for sharing checks (e.g., `user:alice`) |
+| `PRIVACY_FILTER_SHARING_ENABLED` | `false` | Enable sharing authorization checks (`true`/`false`) |
 | `METRICS_ENABLED` | _(empty)_ | Enable OTLP/Prometheus metrics push (`true`) — requires an endpoint to be set |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | _(empty)_ | OTLP HTTP endpoint for metrics (e.g. `http://collector:4318/v1/metrics`) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | Fallback OTLP endpoint if `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is not set |
@@ -154,9 +158,12 @@ pi -e ./index.ts
 
 Metrics are pushed every 30 seconds by default (configurable via `METRICS_PUSH_INTERVAL_MS`).
 
-## OpenFGA Authorization (Optional)
+## OpenFGA Authorization
 
-The extension supports fine-grained authorization via [OpenFGA](https://openfga.dev/) to control which PII categories specific models can access. When OpenFGA is configured, the extension queries it before masking PII — allowing some categories to pass through if the model is authorized.
+The extension supports fine-grained authorization via [OpenFGA](https://openfga.dev/) to control:
+
+1. **Input direction**: Which PII categories/literals a model can **view** (input to the model)
+2. **Output direction**: Which PII a model can **share** to which recipients (output from the model)
 
 ### Quick Start
 
@@ -177,21 +184,33 @@ docker run \
 ./scripts/openfga-init.sh
 ```
 
-   This creates a store named `privacy-policies` and the authorization model. Copy the exported environment variables:
+   This creates a store named `privacy-policies` and the authorization model (v2). Copy the exported environment variables:
 ```bash
 source /tmp/openfga_env.sh
 ```
 
-3. **Grant a model access to a PII category**:
+3. **Grant a model access to a PII category** (input direction):
 ```bash
 # Grant category-level access (model can view all emails)
-./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" private_email
-
-# Grant specific literal access (model can view a specific email)
-./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256-3f2e8d7c4b1a"
+./scripts/openfga-tuple.sh grant-view "mlx-community/MiniMax-M2.7-8bit" private_email
 ```
 
-4. **Run pi-mono with the extension**:
+4. **Set up sharing authorization** (output direction):
+```bash
+# Grant model sharing access to a specific PII instance
+./scripts/openfga-tuple.sh grant-share "mlx-community/MiniMax-M2.7-8bit" "sha256-abc123"
+
+# Set lineage (this PII originated from the model)
+./scripts/openfga-tuple.sh set-lineage "sha256-abc123" "mlx-community/MiniMax-M2.7-8bit"
+
+# Grant recipient access to view this PII
+./scripts/openfga-tuple.sh grant-view-to-recipient "sha256-abc123" "user:alice"
+
+# Establish trust (recipient trusts this model)
+./scripts/openfga-tuple.sh grant-trust "user:alice" "mlx-community/MiniMax-M2.7-8bit"
+```
+
+5. **Run pi-mono with the extension**:
 ```bash
 OPENFGA_API_URL=http://localhost:28080 \
 OPENFGA_STORE_ID=<your-store-id> \
@@ -200,73 +219,76 @@ PRIVACY_FILTER_MODEL_PATH=/path/to/model \
 pi -e ./index.ts
 ```
 
-### Authorization Model (DSL)
+### Authorization Model Types
 
-To manually recreate the OpenFGA authorization model, use this DSL:
+The v2 authorization model defines four types:
 
-```python
-model
-  schema 1.1
+| Type | Description |
+|------|-------------|
+| `model_instance` | An AI model or agent |
+| `pii_instance` | A specific PII occurrence (identified by SHA256 hash of the literal) |
+| `category` | A PII category (e.g., `private_email`, `private_phone`) |
+| `recipient` | A user, harness, or agent that can receive PII |
 
-type model_instance
-  relations
-    define can_view: [privacy_category]
+### Key Relations
 
-type privacy_category
-  relations
-    define can_view: [model_instance]
+**Input Direction (Viewing)**:
+| Relation | From | To | Meaning |
+|----------|------|-----|---------|
+| `can_view` | `model_instance` | `pii_instance` or `category` | Model can view this PII |
+| `can_view` | `recipient` | `pii_instance` | Recipient can view this PII |
+
+**Output Direction (Sharing)**:
+| Relation | From | To | Meaning |
+|----------|------|-----|---------|
+| `can_share` | `model_instance` | `pii_instance` | Model is authorized to share this PII |
+| `lineage` | `pii_instance` | `model_instance` | This PII was created by/through this model |
+| `can_receive_from` | `recipient` | `model_instance` | Recipient trusts this model |
+| `defines` | `category` | `model_instance` | Category defines which models produce it |
+
+### Sharing Authorization Flow
+
+For a model to successfully share PII to a recipient, all four checks must pass:
+
 ```
-
-Or JSON (use the `/stores/{store_id}/authorization-models` endpoint):
-```json
-{
-  "schema_version": "1.1",
-  "type_definitions": [
-    {
-      "type": "model_instance",
-      "relations": {
-        "can_view": {
-          "this": {}
-        }
-      },
-      "metadata": {
-        "relations": {
-          "can_view": {
-            "directly_related_user_types": [
-              { "type": "model_instance" }
-            ]
-          }
-        }
-      }
-    },
-    {
-      "type": "privacy_category",
-      "relations": {
-        "can_view": {
-          "this": {}
-        }
-      },
-      "metadata": {
-        "relations": {
-          "can_view": {
-            "directly_related_user_types": [
-              { "type": "model_instance" }
-            ]
-          }
-        }
-      }
-    }
-  ]
-}
+1. model --can_share--> pii        (model is authorized to share this PII)
+2. pii --lineage--> model          (PII originated from this model)
+3. pii --can_view--> recipient     (recipient is allowed to view this PII)
+4. recipient --can_receive_from--> model  (recipient trusts this model)
 ```
 
 ### Tuple Examples
 
+**Input Direction (Viewing)**:
 | Tuple | Meaning |
 |-------|---------|
-| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:private_email` | Model can view all emails (category-level) |
-| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:sha256-<hash>` | Model can view the specific PII whose SHA256 hash is `<hash>` |
-| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view privacy_category:secret` | Model can view secrets (generally discouraged) |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view category:private_email` | Model can view all emails (category-level) |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view pii_instance:sha256-<hash>` | Model can view the specific PII instance |
+| `model_instance:mlx-community/MiniMax-M2.7-8bit can_view pii_instance:sha256-<hash>` | Model can view a specific literal by hash |
+
+**Output Direction (Sharing)**:
+| Tuple | Meaning |
+|-------|---------|
+| `model_instance:support-bot can_share pii_instance:sha256-<hash>` | Model is authorized to share this PII |
+| `pii_instance:sha256-<hash> lineage model_instance:support-bot` | This PII originated from this model (lineage) |
+| `recipient:alice can_view pii_instance:sha256-<hash>` | Recipient alice can view this PII |
+| `recipient:alice can_receive_from model_instance:support-bot` | Alice trusts outputs from support-bot |
+
+**Category Definitions**:
+| Tuple | Meaning |
+|-------|---------|
+| `category:private_email defines model_instance:scanning-bot` | The email category is defined/produced by scanning-bot |
+
+### Environment Variables for Sharing
+
+| Variable | Description |
+|----------|-------------|
+| `PRIVACY_FILTER_RECIPIENT_ID` | Current recipient for sharing checks (e.g., `user:alice`) |
+| `PRIVACY_FILTER_SHARING_ENABLED` | Set to `true` to enable output direction sharing checks |
+
+When `PRIVACY_FILTER_SHARING_ENABLED=true`:
+- The extension checks if PII can be **shared** to `PRIVACY_FILTER_RECIPIENT_ID`
+- If not enabled, only **viewing** (input) checks are performed
 
 ### Fail-Closed Behavior
 
@@ -281,29 +303,45 @@ If OpenFGA is unreachable or returns an error, the extension **fail-closes** —
 
 | Script | Description |
 |--------|-------------|
-| `scripts/openfga-init.sh` | Create OpenFGA store and authorization model |
-| `scripts/openfga-tuple.sh` | Grant/revoke model access to categories or specific literals |
-| `/check-pii-access` | Chat command: dry-run authorization check without writing tuples |
+| `scripts/openfga-init.sh` | Create OpenFGA store and authorization model (v2) |
+| `scripts/openfga-tuple.sh` | Grant/revoke access to categories, literals, or manage sharing tuples |
 
-The `/check-pii-access` command (e.g. `/check-pii-access mlx-community/MiniMax-M2.7-8bit private_email`) is the quickest way to verify a model's access from within the chat, without needing curl or the shell script.
-
-Usage:
+**Viewing commands**:
 ```bash
-# Initialize (one-time)
-./scripts/openfga-init.sh
+./scripts/openfga-tuple.sh grant-view <model-id> <category>
+./scripts/openfga-tuple.sh revoke-view <model-id> <category>
+```
 
-# Grant category access
-./scripts/openfga-tuple.sh grant "model-id" private_email
+**Sharing commands**:
+```bash
+./scripts/openfga-tuple.sh grant-share <model-id> <pii-hash>
+./scripts/openfga-tuple.sh revoke-share <model-id> <pii-hash>
+./scripts/openfga-tuple.sh set-lineage <pii-hash> <model-id>
+./scripts/openfga-tuple.sh remove-lineage <pii-hash> <model-id>
+```
 
-# Revoke access
-./scripts/openfga-tuple.sh revoke "model-id" private_email
+**Recipient commands**:
+```bash
+./scripts/openfga-tuple.sh grant-view-to-recipient <pii-hash> <recipient-id>
+./scripts/openfga-tuple.sh revoke-view-from-recipient <pii-hash> <recipient-id>
+```
 
-# Check if a model has access to a category or literal
-./scripts/openfga-tuple.sh check "model-id" private_email
+**Trust commands**:
+```bash
+./scripts/openfga-tuple.sh grant-trust <recipient-id> <model-id>
+./scripts/openfga-tuple.sh revoke-trust <recipient-id> <model-id>
+```
 
-# List current tuples
-./scripts/openfga-tuple.sh list
-./scripts/openfga-tuple.sh list "model-id"  # filter by model
+**Category commands**:
+```bash
+./scripts/openfga-tuple.sh define-category <category> <model-id>
+./scripts/openfga-tuple.sh undefine-category <category> <model-id>
+```
+
+**Check and list**:
+```bash
+./scripts/openfga-tuple.sh check <subject> <relation> <object>
+./scripts/openfga-tuple.sh list [filter-type] [filter-value]
 ```
 
 ### Troubleshooting
@@ -324,9 +362,15 @@ Error: OpenFGA check failed (404):
 
 **All PII is being masked despite authorization**
 - Use `/check-pii-access <model-id> <category>` from the chat to verify directly
-- Or check tuples: `./scripts/openfga-tuple.sh list "model-id"`
+- Or check tuples: `./scripts/openfga-tuple.sh list`
 - Verify the model ID matches exactly (including version suffix if present)
-- Ensure the object format is correct: `privacy_category:<category>` or `privacy_category:sha256-<hash>`
+- Ensure the object format is correct: `category:<category>` or `pii_instance:sha256-<hash>`
+
+**Sharing authorization failing**
+- Verify all four checks pass (model_can_share, lineage_valid, recipient_can_view, recipient_trusts)
+- Use `./scripts/openfga-tuple.sh check <subject> <relation> <object>` to debug individual tuples
+- Ensure `PRIVACY_FILTER_SHARING_ENABLED=true` is set
+- Ensure `PRIVACY_FILTER_RECIPIENT_ID` is set to the correct recipient
 
 **OpenFGA returns error on write**
 - If using authentication, ensure `OPENFGA_API_TOKEN` is set
