@@ -10,8 +10,8 @@
  *   model_instance:M --can_view--> pii_instance:P
  *   model_instance:M --can_share--> pii_instance:P
  *   model_instance:M --can_receive--> pii_instance:P
- *   model_instance:M --originates_from--> pii_instance:P (inverse)
- *   pii_instance:P --originates_from--> model_instance:M (who created this PII)
+ *   model_instance:M --lineage--> pii_instance:P (lineage check target)
+ *   pii_instance:P --lineage--> model_instance:M (who created this PII)
  *   pii_instance:P --can_view--> recipient:R (who can view this PII)
  *   pii_instance:P --category--> category:C (what category this PII belongs to)
  *   category:C --defines--> model_instance:M (which models can produce this category)
@@ -203,7 +203,7 @@ export class OpenFGAClient {
    * 
    * This performs the combined check:
    *   1. model:subject --can_share--> pii_instance:instance
-   *   2. pii_instance:instance --originates_from--> model:subject
+   *   2. pii_instance:instance --lineage--> model:subject
    *   3. pii_instance:instance --can_view--> recipient:recipient
    *   4. (optional) recipient:recipient --can_receive_from--> model:subject
    *
@@ -251,7 +251,7 @@ export class OpenFGAClient {
       return { allowed: false, modelCanShare: false, lineageValid: false, recipientCanView: false };
     }
 
-    // 2. Check pii_instance --originates_from--> model (lineage)
+    // 2. Check pii_instance --lineage--> model (lineage)
     try {
       const r2 = await fetch(
         `${this.config.apiUrl}/stores/${this.config.storeId}/check`,
@@ -264,7 +264,7 @@ export class OpenFGAClient {
           body: JSON.stringify({
             tuple_key: {
               user: piiInstanceId,
-              relation: "originates_from",
+              relation: "lineage",
               object: modelId,
             },
             ...(this.config.modelId && { authorization_model_id: this.config.modelId }),

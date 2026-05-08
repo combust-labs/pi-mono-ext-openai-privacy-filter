@@ -196,7 +196,7 @@ export async function buildDeniedCategoriesSet(
  * 
  * A category/literal is blocked when ANY of these conditions are met:
  *   1. Model is NOT authorized to share it (model --can_share--> pii)
- *   2. PII does NOT originate from this model (pii --originates_from--> model)
+ *   2. PII does NOT have lineage to this model (pii --lineage--> model)
  *   3. Recipient is NOT authorized to view this PII (pii --can_view--> recipient)
  *   4. Recipient does NOT trust this model (recipient --can_receive_from--> model)
  *      [only checked if PRIVACY_FILTER_RECIPIENT_ID is set and checkRecipientTrust is true]
