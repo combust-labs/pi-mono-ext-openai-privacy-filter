@@ -14,57 +14,85 @@ User ──prompt──► pi-mono ──messages──► LLM ──response─
                    Called                                                  Called
 ```
 
+---
+
 ## Direction 1: Input Direction (User → LLM)
 
 **Purpose**: Detect and mask/control PII in what the user sends to the model.
 
 ### Lifecycle Events for Input Direction
 
-| Event | Purpose |
-|-------|---------|
-| `input` | Raw user input received - can intercept/transform |
-| `before_agent_start` | User prompt + system prompt - can inject messages |
-| `context` | Messages array before each LLM call - can modify/filter |
-| `before_provider_request` | Full API payload - can inspect/replace |
+| Event | Required? | Purpose |
+|-------|-----------|---------|
+| `input` | ❌ Optional | Raw user input - fires before skill/template expansion |
+| `before_agent_start` | ✅ Required | Current prompt + system prompt - where current PII is detected |
+| `context` | ✅ Required | Full messages array (history) - where historical PII is filtered |
+| `before_provider_request` | ❌ Optional | Final API payload - useful for debugging but not required |
 
-### PII Check Points (Input)
+### Event Analysis
 
-1. **`input` event**: 
-   - First opportunity to see user input
-   - Can transform or block before any processing
-   - Example: `if (event.text.includes("secret")) return { block: true }`
+**1. `input` event** - ❌ OPTIONAL
+- Fires with raw text BEFORE skill/template expansion
+- **Not required** because:
+  - Whatever PII exists after expansion will be caught by `before_agent_start`
+  - Early interception adds complexity without additional filtering benefit
+  - Could be useful for blocking specific patterns before expansion
 
-2. **`before_agent_start` event**:
-   - User prompt is available at `event.prompt`
-   - Can inject additional context/messages
-   - System prompt can be modified via `event.systemPrompt`
+**2. `before_agent_start` event** - ✅ REQUIRED
+- User prompt is available at `event.prompt`
+- System prompt can be modified via `event.systemPrompt`
+- **This is where the current prompt's PII is detected and masked**
+- Can inject additional context/messages
 
-3. **`context` event**:
-   - Messages array (`event.messages`) is mutable
-   - Can filter out messages with PII before LLM call
-   - Deep copy - safe to modify
+**3. `context` event** - ✅ REQUIRED
+- Messages array (`event.messages`) is mutable - deep copy, safe to modify
+- **This is where conversation history PII is filtered**
+- Catches PII in previous user messages before LLM processes them
+- Also filters out extension-generated messages (like PII alerts)
 
-4. **`before_provider_request` event**:
-   - Final payload before sending to LLM
-   - Can inspect full message structure
-   - Can replace payload entirely if needed
+**4. `before_provider_request` event** - ❌ OPTIONAL
+- Final payload before sending to LLM
+- **Useful for debugging** to verify what actually gets sent
+- Not required for filtering since `before_agent_start` + `context` cover everything
 
-### Implementation Pattern (Input)
+### Minimal Implementation: Input Direction
 
 ```typescript
+// Only TWO events are strictly required for input direction PII checks
+
+pi.on("before_agent_start", async (event, ctx) => {
+  // Detect and mask PII in current prompt
+  const results = await classifier(event.prompt, { aggregation_strategy: "simple" });
+  const modelSubject = ctx.model?.id;
+  const deniedCategories = await buildDeniedCategoriesSet(results, modelSubject);
+  const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
+  
+  return {
+    prompt: maskPII(event.prompt, piiToMask),
+    systemPrompt: event.systemPrompt + injection,  // Add privacy notice
+  };
+});
+
 pi.on("context", async (event, ctx) => {
-  const filtered = event.messages.map(msg => {
+  // Filter PII from message history
+  for (const msg of event.messages) {
     if (msg.role === "user") {
-      return {
-        ...msg,
-        content: maskPII(msg.content)
-      };
+      // Detect and mask PII in each user message
+      const results = await classifier(extractText(msg.content), {...});
+      // ... apply authorization and mask
     }
-    return msg;
-  });
-  return { messages: filtered };
+  }
+  return { messages: filteredMessages };
 });
 ```
+
+### Why Input Direction Works with Only 2 Events
+
+| Source of PII | Covered By |
+|---------------|------------|
+| Current user prompt | `before_agent_start` ✅ |
+| Conversation history (user messages) | `context` ✅ |
+| Expanded content (from skills/templates) | `before_agent_start` (after expansion) ✅ |
 
 ---
 
@@ -74,55 +102,110 @@ pi.on("context", async (event, ctx) => {
 
 ### Lifecycle Events for Output Direction
 
-| Event | Purpose |
-|-------|---------|
-| `message_start` | Assistant message begins - can inspect initial structure |
-| `message_update` | Token-by-token streaming - can catch PII as it appears |
-| `message_end` | Finalized message - can replace/modify before delivery |
-| `tool_result` | Tool execution results - can modify before LLM sees them |
+| Event | Required? | Purpose |
+|-------|-----------|---------|
+| `message_start` | ❌ Optional | Assistant message begins - fires before any content |
+| `message_update` | ❌ Optional | Token-by-token streaming - catches PII as it appears |
+| `message_end` | ✅ **REQUIRED** | Finalized message - **primary and only required hook** |
+| `tool_result` | ❌ Optional | Tool results returned to LLM - not to user directly |
 
-### PII Check Points (Output)
+### Event Analysis
 
-1. **`message_start` event**:
-   - Assistant message begins
-   - Role is `"assistant"`
-   - Early hook before any content is generated
+**1. `message_start` event** - ❌ OPTIONAL
+- Assistant message begins
+- Role is `"assistant"`
+- **No content yet** - too early to do anything useful
+- Could initialize state for streaming detection, but not required
 
-2. **`message_update` event**:
-   - Token-by-token streaming updates
-   - `event.assistantMessageEvent` contains stream data
-   - Can detect PII as it streams in
+**2. `message_update` event** - ❌ OPTIONAL (but useful)
+- Token-by-token streaming updates
+- `event.assistantMessageEvent` contains stream data
+- **Caveat**: Content is incomplete, complicating hash computation for authorization
+- Could be used for early detection/streaming mask, but adds complexity
 
-3. **`message_end` event** (most reliable for output checks):
-   - Message is finalized
-   - Full content available at `event.message.content`
-   - Can replace the message entirely via return value
-   - **This is the primary hook for output PII checks**
+**3. `message_end` event** - ✅ **REQUIRED**
+- Message is finalized
+- Full content available at `event.message.content`
+- Can return `{ message }` to replace/modify before delivery
+- **This is the primary and essentially only required event for output PII checks**
+- 4-way sharing authorization works best with complete content
 
-4. **`tool_result` event**:
-   - Tool results returned to LLM
-   - Can modify results before LLM processes them
-   - Useful if model-generated content comes through tools
+**4. `tool_result` event** - ❌ OPTIONAL
+- Tool results returned to LLM (not to user)
+- **Only relevant if**:
+  - Model-generated PII comes via tool execution
+  - AND you want to filter it before LLM sees the result
+- Typically not needed for output direction user-facing checks
 
-### Implementation Pattern (Output)
+### Why `message_end` is Sufficient for Output Direction
+
+1. **Complete content** - Full message available, no partial hash issues
+2. **Can replace message** - Return `{ message }` to modify before delivery
+3. **Single point** - One event covers all output scenarios
+4. **Authorization-friendly** - 4-way check requires hashing literal → need full content
+
+### Minimal Implementation: Output Direction
 
 ```typescript
+// ONLY message_end is strictly required for output direction PII checks
+
 pi.on("message_end", async (event, ctx) => {
   if (event.message.role !== "assistant") return;
   
-  const content = event.message.content;
-  const masked = maskPII(content);
+  // Check if sharing is enabled
+  if (!isSharingEnabled()) return;
   
-  if (masked !== content) {
+  // Extract full content - available at message_end
+  const content = extractText(event.message.content);
+  if (!content) return;
+  
+  // Detect PII in model's response
+  const results = await classifier(content, { aggregation_strategy: "simple" });
+  if (results.length === 0) return;
+  
+  // Apply 4-way sharing authorization check
+  const modelSubject = ctx.model?.id;
+  const recipientId = getRecipientId();
+  
+  const deniedCategories = await buildSharingDeniedCategoriesSet(
+    results, 
+    modelSubject, 
+    recipientId,
+    { checkRecipientTrust: true }
+  );
+  
+  // Mask if any category is denied
+  const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
+  if (piiToMask.length > 0) {
+    const maskedContent = maskPII(content, piiToMask);
     return {
       message: {
         ...event.message,
-        content: masked
+        content: maskedContent
       }
     };
   }
 });
 ```
+
+### Streaming Consideration
+
+If you want to mask PII **as it streams** (before message is complete):
+
+```typescript
+// This adds complexity and is NOT required
+pi.on("message_update", async (event, ctx) => {
+  // Problem: Content is incomplete, so:
+  // 1. SHA256 hash won't match full content
+  // 2. Authorization checks may fail incorrectly
+  // 3. Masking partial content breaks the stream
+  
+  // Only viable if: you detect PII and set a flag to mask at message_end
+  // This adds significant complexity for marginal benefit
+});
+```
+
+**Recommendation**: Stick with `message_end` only. The latency between streaming completion and message_end delivery is minimal.
 
 ---
 
@@ -132,12 +215,12 @@ Based on the Privacy Filter extension's sharing authorization feature, a complet
 
 ### Direction Matrix
 
-| Direction | Source | Target | Check Point | Purpose |
-|-----------|--------|--------|-------------|---------|
-| **Input** | User | LLM | `context`, `before_provider_request` | Control what model sees |
+| Direction | Source | Target | Required Events | Purpose |
+|-----------|--------|--------|-----------------|---------|
+| **Input** | User | LLM | `before_agent_start` + `context` | Control what model sees |
 | **Output** | LLM | User | `message_end` | Control what user receives |
-| **Tool Input** | LLM | Tool | `tool_call` | Control tool execution |
-| **Tool Output** | Tool | LLM | `tool_result` | Control tool results returned |
+| **Tool Input** | LLM | Tool | `tool_call` | Control tool execution (optional) |
+| **Tool Output** | Tool | LLM | `tool_result` | Control tool results returned (optional) |
 
 ### The Sharing Authorization Flow (Output Direction with Authorization)
 
@@ -207,6 +290,7 @@ user prompt
 │ INPUT CHECKS (before LLM sees anything)                     │
 │                                                             │
 │   input ──► before_agent_start ──► context ──► before_provider_request │
+│   (opt)     (REQUIRED)────(REQUIRED)─── (debug only)       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
     │
@@ -218,11 +302,9 @@ LLM processes and responds
 │ OUTPUT CHECKS (before user sees response)                   │
 │                                                             │
 │   message_start ──► message_update ──► message_end          │
-│                           │                                 │
-│                     (can detect PII                        │
-│                      as it streams)                        │
+│      (skip)           (skip)           (REQUIRED)          │
 │                                                             │
-│   If sharing enabled:                                       │
+│   message_end:                                               │
 │     - Extract PII from finalized message                    │
 │     - Perform 4-way OpenFGA authorization check             │
 │     - Mask if any check fails                              │
@@ -233,18 +315,32 @@ LLM processes and responds
 Output delivered to user
 ```
 
+### Legend
+- `(REQUIRED)` = Strictly required for PII checks
+- `(opt)` = Optional, not needed for basic PII filtering
+- `(debug only)` = Useful for debugging but not required
+
 ---
 
 ## Key Differences: Input vs Output Checks
 
 | Aspect | Input Direction | Output Direction |
 |--------|-----------------|------------------|
-| **Primary event** | `context` | `message_end` |
+| **Required events** | `before_agent_start` + `context` | `message_end` only |
+| **Optional events** | `input`, `before_provider_request` | `message_update`, `tool_result` |
 | **Content source** | User's prompt + history | Model's generated response |
-| **Authorization** | Category/literal level | Sharing + lineage required |
-| **OpenFGA checks** | `can_view` | `can_share` + `lineage` + `can_view` + `can_receive_from` |
+| **Authorization** | Category/literal level via `can_view` | Sharing + lineage via 4-way check |
 | **Failure behavior** | Mask before LLM sees | Mask before user sees |
-| **Streaming support** | N/A (content complete before LLM call) | `message_update` can catch PII as it streams |
+| **Streaming support** | N/A (content complete before LLM call) | Full content at `message_end` |
+
+---
+
+## Required vs Optional Events Summary
+
+| Direction | Strictly Required | Optional (Not Needed) |
+|-----------|-------------------|----------------------|
+| **Input (User → LLM)** | `before_agent_start`, `context` | `input`, `before_provider_request` |
+| **Output (LLM → User)** | `message_end` | `message_start`, `message_update`, `tool_result` |
 
 ---
 
@@ -252,65 +348,71 @@ Output delivered to user
 
 Based on analysis of `index.ts`, `openfga.ts`, and `privacy-auth.ts`:
 
-### Input Direction (User → LLM) ✅ PARTIALLY IMPLEMENTED
+### Input Direction (User → LLM) ✅ CORRECTLY IMPLEMENTED
 
 | Event | Status | Implementation Details |
 |-------|--------|------------------------|
-| `input` | ❌ NOT IMPLEMENTED | Raw user input interception not hooked |
 | `before_agent_start` | ✅ IMPLEMENTED | Detects PII, applies `buildDeniedCategoriesSet()` with `can_view` checks, masks prompt, injects system prompt |
 | `context` | ✅ IMPLEMENTED | Scans user messages in history, applies same authorization, filters PII alert messages |
-| `before_provider_request` | ❌ NOT IMPLEMENTED | No final payload validation before LLM call |
+| `input` | ❌ NOT IMPLEMENTED | Not required - optional early interception |
+| `before_provider_request` | ❌ NOT IMPLEMENTED | Not required - `before_agent_start` + `context` cover everything |
 
-**Input Direction Authorization Function:**
-- `buildDeniedCategoriesSet()` in `privacy-auth.ts`
-- Uses: `can_view` relation only
-- Checks: Category-level → Literal-level fallback
+**Note**: Current implementation correctly uses only the required events.
 
 ### Output Direction (LLM → User) ❌ NOT IMPLEMENTED
 
 | Event | Status | Implementation Details |
 |-------|--------|------------------------|
-| `message_start` | ❌ NOT IMPLEMENTED | No hook for assistant message start |
-| `message_update` | ❌ NOT IMPLEMENTED | No streaming PII detection |
-| `message_end` | ❌ NOT IMPLEMENTED | **This is where output checks SHOULD happen** |
-| `tool_call` | ❌ NOT IMPLEMENTED | No tool call blocking |
-| `tool_result` | ❌ NOT IMPLEMENTED | No tool result modification |
+| `message_end` | ❌ NOT IMPLEMENTED | **This is the ONLY event that needs implementation** |
+| `message_start` | ❌ NOT IMPLEMENTED | Not required - no content yet |
+| `message_update` | ❌ NOT IMPLEMENTED | Not required - `message_end` is sufficient |
+| `tool_result` | ❌ NOT IMPLEMENTED | Not required for user-facing output |
 
 **Available but Not Used:**
-- `buildSharingDeniedCategoriesSet()` exists in `privacy-auth.ts`
-- `checkSharingAuthorization()` exists for per-entity sharing checks
-- `isSharingEnabled()` gating function exists
-- All OpenFGA tuple functions exist in `openfga.ts`
+- `buildSharingDeniedCategoriesSet()` in `privacy-auth.ts` ✅ Ready
+- `checkSharingAuthorization()` in `privacy-auth.ts` ✅ Ready
+- `isSharingEnabled()` gating function ✅ Ready
+- All OpenFGA tuple functions in `openfga.ts` ✅ Ready
 
 ### What's Missing for Output Direction
 
-The extension has all the necessary authorization functions (`buildSharingDeniedCategoriesSet`, `checkSharingAuthorization`) but is missing the event handlers to:
+The extension has all necessary authorization functions but is missing only:
 
-1. **Detect PII** in model's response via `message_end`
-2. **Apply 4-way sharing authorization**:
-   - `model --can_share--> pii_instance`
-   - `pii_instance --lineage--> model`
-   - `recipient --can_view--> pii_instance`
-   - `recipient --can_receive_from--> model`
-3. **Mask PII** if any check fails
-4. **Use environment variables** to gate behavior:
-   - `PRIVACY_FILTER_SHARING_ENABLED=true`
-   - `PRIVACY_FILTER_RECIPIENT_ID=user:alice`
+```typescript
+// This single handler is all that's needed for output direction
+pi.on("message_end", async (event, ctx) => {
+  if (event.message.role !== "assistant") return;
+  if (!isSharingEnabled()) return;
+  
+  const content = extractText(event.message.content);
+  const results = await classifier(content, {...});
+  const modelSubject = ctx.model?.id;
+  const recipientId = getRecipientId();
+  
+  const deniedCategories = await buildSharingDeniedCategoriesSet(
+    results, modelSubject, recipientId, { checkRecipientTrust: true }
+  );
+  
+  const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
+  if (piiToMask.length > 0) {
+    return { message: { ...event.message, content: maskPII(content, piiToMask) } };
+  }
+});
+```
 
 ### Code Location Reference
 
 ```
 index.ts:
-  ✅ before_agent_start handler (line ~70) - Input PII checks
-  ✅ context handler (line ~130) - Context PII checks
-  ❌ message_end handler - MISSING (output checks should go here)
-  ❌ tool_result handler - MISSING
+  ✅ before_agent_start handler - Input PII checks (current prompt)
+  ✅ context handler - Input PII checks (history)
+  ❌ message_end handler - MISSING (only event needed for output)
 
 privacy-auth.ts:
-  ✅ buildDeniedCategoriesSet() - Input direction authorization
-  ✅ buildSharingDeniedCategoriesSet() - Output direction authorization (exists but not called)
-  ✅ checkSharingAuthorization() - Per-entity sharing check (exists but not called)
-  ✅ isSharingEnabled() - Gating function (exists but not used)
+  ✅ buildDeniedCategoriesSet() - Input direction (ready)
+  ✅ buildSharingDeniedCategoriesSet() - Output direction (ready but not called)
+  ✅ checkSharingAuthorization() - Per-entity sharing (ready but not called)
+  ✅ isSharingEnabled() - Gating function (ready but not used)
 
 openfga.ts:
   ✅ check() - Basic can_view checks
@@ -323,12 +425,11 @@ openfga.ts:
 
 ## Recommendations
 
-1. **Input checks** are well implemented via `before_agent_start` and `context`
-2. **Missing `input` event** handler could add early input transformation
-3. **Missing `before_provider_request`** could add final payload validation
-4. **Add `message_end` handler** to implement output direction checks using `buildSharingDeniedCategoriesSet()`
-5. **Use existing `isSharingEnabled()`** to gate output direction checks
-6. **Environment variables** `PRIVACY_FILTER_RECIPIENT_ID` and `PRIVACY_FILTER_SHARING_ENABLED` already exist but aren't wired to output checks
+1. **Input direction** is correctly implemented with `before_agent_start` + `context`
+2. **Add only `message_end` handler** to implement output direction - it's the only required event
+3. **Don't need** `input` or `before_provider_request` for input direction
+4. **Don't need** `message_start`, `message_update`, or `tool_result` for output direction
+5. **Environment variables** `PRIVACY_FILTER_RECIPIENT_ID` and `PRIVACY_FILTER_SHARING_ENABLED` exist but need wiring to the new `message_end` handler
 
 ---
 
