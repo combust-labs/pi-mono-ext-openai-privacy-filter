@@ -203,12 +203,12 @@ export default function piiExtension(pi: ExtensionAPI) {
     const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
     if (piiToMask.length === 0) return;
 
-    // Mask the denied PII and return modified message
+    // Mask the denied PII and return modified message as text content block
     const maskedContent = maskPII(content, piiToMask);
     return {
       message: {
         ...event.message,
-        content: maskedContent,
+        content: [{ type: 'text', text: maskedContent }],
       },
     };
   });

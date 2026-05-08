@@ -40,6 +40,10 @@ export type ContextEvent = {
 
 export type SessionStartEvent = void;
 
+export type MessageEndEvent = {
+  message: AgentMessage;
+};
+
 export type RegisteredRenderer = {
   id: string;
   fn: (message: { content: string }, context: { expanded: boolean }, theme: Record<string, (s: string, t: unknown) => string>) => unknown;
@@ -55,6 +59,7 @@ export type EventHandlers = {
   before_agent_start: (event: BeforeAgentStartEvent, ctx: ShimContext) => Promise<{ prompt?: string; systemPrompt?: string } | void>;
   context: (event: ContextEvent, ctx: ShimContext) => Promise<{ messages: AgentMessage[] } | void>;
   session_start: (event: SessionStartEvent, ctx: ShimContext) => Promise<void>;
+  message_end: (event: MessageEndEvent, ctx: ShimContext) => Promise<{ message: AgentMessage } | void>;
 };
 
 export type ShimContext = {
@@ -102,6 +107,7 @@ export function createShimExtensionAPI(): ShimExtensionAPI {
     before_agent_start: [],
     context: [],
     session_start: [],
+    message_end: [],
   };
 
   const ctx: ShimContext = {
@@ -162,6 +168,7 @@ export function createShimExtensionAPI(): ShimExtensionAPI {
       if (Array.isArray(handlers)) handlers.length = 0;
     }
     ctx.model = { id: 'test-model/1.0' };
+    eventHandlers.message_end = [];
   }
 
   return { api, ctx, sentMessages, registeredRenderers, registeredCommands, eventHandlers, reset, trigger, invokeCommand };
