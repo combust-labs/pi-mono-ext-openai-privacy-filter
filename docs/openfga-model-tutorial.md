@@ -280,7 +280,7 @@ type pii_instance
     define can_view: [recipient, pii_instance]
     define can_share: [model_instance]
     define can_receive: [model_instance]
-    define lineage: [pii_instance]
+    define lineage: [pii_instance, model_instance]
     define category: [category]
 
 # A user, harness, or agent that can receive PII
@@ -313,7 +313,7 @@ type category
 | `can_view` | `recipient`, `pii_instance` | Who can view this PII |
 | `can_share` | `model_instance` | Who can share this PII |
 | `can_receive` | `model_instance` | Who can receive this PII |
-| `lineage` | `pii_instance` | Self-reference for cross-type checks |
+| `lineage` | `pii_instance`, `model_instance` | For cross-type lineage checks (who created this PII) |
 | `category` | `category` | Category of this PII |
 
 #### Type: recipient

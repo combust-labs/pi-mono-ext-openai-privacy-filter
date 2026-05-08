@@ -172,7 +172,8 @@ create_model() {
                             },
                             "lineage": {
                                 "directly_related_user_types": [
-                                    { "type": "pii_instance" }
+                                    { "type": "pii_instance" },
+                                    { "type": "model_instance" }
                                 ]
                             },
                             "category": {
