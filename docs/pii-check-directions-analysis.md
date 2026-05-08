@@ -207,6 +207,77 @@ pi.on("message_update", async (event, ctx) => {
 
 **Recommendation**: Stick with `message_end` only. The latency between streaming completion and message_end delivery is minimal.
 
+### When `tool_result` Matters
+
+`tool_result` is **NOT required** for basic output direction filtering, but becomes important in these scenarios:
+
+#### 1. Tool Output Feeds Back to LLM (Input Direction Supplement)
+
+When a tool executes, its results become part of the conversation context for the LLM's next turn:
+
+```
+User → LLM → Tool Call → Tool Executes → tool_result → LLM (next turn)
+                                              ↑
+                                     PII might appear here!
+```
+
+**Example cases**:
+- `bash` command outputs a CSV with emails
+- `read` reads a config file containing secrets
+- `grep` finds patterns with sensitive data
+
+In this case, `tool_result` is **part of input direction** - you're filtering what the LLM can see through tool execution.
+
+#### 2. Tool Output Goes to Other Agents or Recipients
+
+If your setup includes:
+- **Agent-to-agent communication**
+- **Harnesses that receive tool outputs**
+- **External systems consuming tool results**
+
+Tool output may be displayed to users or other systems, making `tool_result` relevant for **output direction**.
+
+#### 3. Direct Tool Output to User
+
+Some tools (e.g., `read`, `grep`) return results directly displayed to users. If tool output contains PII that shouldn't be shown, `tool_result` is the place to filter.
+
+### When to Use `tool_result`
+
+| Scenario | Use `tool_result`? | Direction Classification |
+|----------|-------------------|--------------------------|
+| Filter tool PII before LLM sees it | ✅ Yes | Input (supplemental) |
+| Tool output goes to other agents/recipients | ✅ Yes | Output (supplemental) |
+| Tool output displayed directly to user | ✅ Yes | Output |
+| Basic model text response filtering | ❌ No | `message_end` sufficient |
+
+### Implementation Pattern: `tool_result`
+
+```typescript
+pi.on("tool_result", async (event, ctx) => {
+  // event.toolName, event.toolCallId, event.content, event.details
+  
+  const content = extractText(event.content);
+  const results = await classifier(content, {...});
+  
+  if (results.length === 0) return;
+  
+  // For input direction (LLM seeing tool results):
+  // Use buildDeniedCategoriesSet() with can_view
+  
+  // For output direction (user/others seeing tool results):
+  // Use buildSharingDeniedCategoriesSet() with can_share + lineage
+  
+  const piiToMask = results.filter(r => ...);
+  if (piiToMask.length > 0) {
+    return {
+      content: maskPII(content, piiToMask),
+      details: event.details,
+      isError: event.isError
+    };
+  }
+});
+```
+
 ---
 
 ## Complete 4-Way Check Model
@@ -217,10 +288,10 @@ Based on the Privacy Filter extension's sharing authorization feature, a complet
 
 | Direction | Source | Target | Required Events | Purpose |
 |-----------|--------|--------|-----------------|---------|
-| **Input** | User | LLM | `before_agent_start` + `context` | Control what model sees |
-| **Output** | LLM | User | `message_end` | Control what user receives |
-| **Tool Input** | LLM | Tool | `tool_call` | Control tool execution (optional) |
-| **Tool Output** | Tool | LLM | `tool_result` | Control tool results returned (optional) |
+| **Input (primary)** | User | LLM | `before_agent_start` + `context` | Control what model sees from prompts |
+| **Input (supplemental)** | Tool Result | LLM | `tool_result` | Control what model sees from tool execution |
+| **Output (primary)** | LLM | User | `message_end` | Control what user receives in text responses |
+| **Output (supplemental)** | Tool Result | User/Other | `tool_result` | Control tool output displayed to users/agents |
 
 ### The Sharing Authorization Flow (Output Direction with Authorization)
 
@@ -337,10 +408,10 @@ Output delivered to user
 
 ## Required vs Optional Events Summary
 
-| Direction | Strictly Required | Optional (Not Needed) |
-|-----------|-------------------|----------------------|
-| **Input (User → LLM)** | `before_agent_start`, `context` | `input`, `before_provider_request` |
-| **Output (LLM → User)** | `message_end` | `message_start`, `message_update`, `tool_result` |
+| Direction | Strictly Required | Optional (Use When Needed) |
+|-----------|-------------------|----------------------------|
+| **Input (User → LLM)** | `before_agent_start`, `context` | `tool_result` (if tools reveal PII to LLM) |
+| **Output (LLM → User)** | `message_end` | `tool_result` (if tool output goes to users/agents) |
 
 ---
 
@@ -363,8 +434,8 @@ Based on analysis of `index.ts`, `openfga.ts`, and `privacy-auth.ts`:
 
 | Event | Status | Implementation Details |
 |-------|--------|------------------------|
-| `message_end` | ❌ NOT IMPLEMENTED | **This is the ONLY event that needs implementation** |
-| `message_start` | ❌ NOT IMPLEMENTED | Not required - no content yet |
+| `message_end` | ❌ NOT IMPLEMENTED | **Primary hook - only event strictly required** |
+| `tool_result` | ❌ NOT IMPLEMENTED | Optional - needed only if tool output goes to users/agents | |
 | `message_update` | ❌ NOT IMPLEMENTED | Not required - `message_end` is sufficient |
 | `tool_result` | ❌ NOT IMPLEMENTED | Not required for user-facing output |
 
