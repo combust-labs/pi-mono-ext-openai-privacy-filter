@@ -257,6 +257,89 @@ This allows both `recipient#can_view@pii_instance` and `pii_instance#can_view@pi
 
 ---
 
+## Complete Authorization Model (DSL)
+
+Below is the complete OpenFGA authorization model in DSL format. This can be used with the FGA CLI to generate the JSON model.
+
+```fga
+model
+  schema 1.1
+
+# AI model or agent that can view/share PII
+type model_instance
+  relations
+    define can_view: [pii_instance]
+    define can_share: [pii_instance]
+    define can_receive: [pii_instance]
+    define can_receive_from: [recipient]
+    define lineage: [pii_instance]
+
+# A specific PII occurrence (identified by SHA256 hash of the literal)
+type pii_instance
+  relations
+    define can_view: [recipient, pii_instance]
+    define can_share: [model_instance]
+    define can_receive: [model_instance]
+    define lineage: [pii_instance]
+    define category: [category]
+
+# A user, harness, or agent that can receive PII
+type recipient
+  relations
+    define can_receive: [pii_instance]
+    define can_receive_from: [model_instance]
+    define can_view: [pii_instance, recipient]
+
+# A PII category (e.g., private_email, private_phone)
+type category
+  relations
+    define defines: [model_instance]
+```
+
+### Model Explanation
+
+#### Type: model_instance
+| Relation | Allowed Users | Purpose |
+|----------|---------------|---------|
+| `can_view` | `pii_instance` | Check if model can view PII (input direction) |
+| `can_share` | `pii_instance` | Check if model is authorized to share PII |
+| `can_receive` | `pii_instance` | Check if model can receive PII |
+| `can_receive_from` | `recipient` | Check if model is trusted by recipient |
+| `lineage` | `pii_instance` | For cross-type lineage checks |
+
+#### Type: pii_instance
+| Relation | Allowed Users | Purpose |
+|----------|---------------|---------|
+| `can_view` | `recipient`, `pii_instance` | Who can view this PII |
+| `can_share` | `model_instance` | Who can share this PII |
+| `can_receive` | `model_instance` | Who can receive this PII |
+| `lineage` | `pii_instance` | Self-reference for cross-type checks |
+| `category` | `category` | Category of this PII |
+
+#### Type: recipient
+| Relation | Allowed Users | Purpose |
+|----------|---------------|---------|
+| `can_receive` | `pii_instance` | What PII recipient can receive |
+| `can_receive_from` | `model_instance` | Which models recipient trusts |
+| `can_view` | `pii_instance`, `recipient` | What PII recipient can view |
+
+#### Type: category
+| Relation | Allowed Users | Purpose |
+|----------|---------------|---------|
+| `defines` | `model_instance` | Which models produce this category |
+
+### Generating JSON from DSL
+
+If you need the JSON representation, use the FGA CLI:
+
+```bash
+fga model transform --file=model.fga
+```
+
+Or use the API endpoint directly as shown in `scripts/openfga-init.sh`.
+
+---
+
 ## Complete Example
 
 ### Scenario
@@ -305,4 +388,5 @@ If any check fails → PII is masked.
 
 - [Proposal: Reverse PII Sharing Authorization](./proposal-reverse-pii-sharing-authorization.md)
 - [OpenFGA Documentation](https://openfga.dev/docs)
+- [OpenFGA Modeling Getting Started](https://openfga.dev/docs/modeling/getting-started)
 - OpenFGA schema 1.1 specification
