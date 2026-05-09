@@ -653,10 +653,10 @@ The following tasks are required to fully implement the Reverse PII Sharing Auth
 
 ### Optional: Enhanced Scenarios
 
-- [ ] **19. Implement `tool_result` handler (multi-agent scenarios)**
-  - [ ] Detect when tool result will go to different user/agent
-  - [ ] Apply output direction checks (`can_share`)
-  - [ ] Return modified `content` in `tool_result` handler
+- [x] **19. Implement `tool_result` handler (multi-agent scenarios)**
+  - [x] Detect when tool result will go to different user/agent
+  - [x] Apply output direction checks (`can_share`)
+  - [x] Return modified `content` in `tool_result` handler
 
 - [ ] **20. Implement streaming detection via `message_update`**
   - [ ] Track PII detected so far
@@ -685,47 +685,6 @@ The following tasks are required to fully implement the Reverse PII Sharing Auth
 - [x] **24. New tests pass**
   - [x] All new unit tests pass
   - [x] Integration tests pass with `OPENFGA_INTEGRATION_TEST=true`
-
-- [ ] **25. Manual verification**
-  - [ ] Verify input direction still works
-  - [ ] Verify output direction blocks PII when sharing disabled
-  - [ ] Verify output direction allows PII when 4-way check passes
-  - [ ] Verify OpenFGA tuples are created correctly
-
-### Optional: Enhanced Scenarios
-
-- [ ] **19. Implement `tool_result` handler (multi-agent scenarios)**
-  - [ ] Detect when tool result will go to different user/agent
-  - [ ] Apply output direction checks (`can_share`)
-  - [ ] Return modified `content` in `tool_result` handler
-
-- [ ] **20. Implement streaming detection via `message_update`**
-  - [ ] Track PII detected so far
-  - [ ] Set flag to mask at `message_end` if needed
-  - [ ] Consider partial hash computation challenges
-
-### Documentation
-
-- [ ] **21. Update README.md**
-  - [ ] Document `message_end` handler implementation
-  - [ ] Document `PRIVACY_FILTER_SHARING_ENABLED`
-  - [ ] Document `PRIVACY_FILTER_RECIPIENT_ID`
-  - [ ] Add example tuple setup commands
-
-- [ ] **22. Update inline code comments**
-  - [ ] Document 4-way check flow in `message_end` handler
-  - [ ] Document each check's purpose
-  - [ ] Document env var usage
-
-### Pre-deployment Verification
-
-- [ ] **23. All existing tests pass**
-  - [ ] Run `npm test` and verify 155+ tests pass
-  - [ ] No regressions in existing functionality
-
-- [ ] **24. New tests pass**
-  - [ ] All new unit tests pass
-  - [ ] Integration tests pass with `OPENFGA_INTEGRATION_TEST=true`
 
 - [ ] **25. Manual verification**
   - [ ] Verify input direction still works
