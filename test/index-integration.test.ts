@@ -829,3 +829,197 @@ describe('message_end', () => {
     delete process.env.PRIVACY_FILTER_RECIPIENT_ID;
   });
 });
+
+// ---------------------------------------------------------------------------
+// tool_result tests
+// ----------------------------------------------------------------------------
+
+describe('tool_result', () => {
+  let importCounter = 0;
+
+  it('returns early when sharing is disabled', async () => {
+    // Don't set PRIVACY_FILTER_SHARING_ENABLED
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    const result = await shim.trigger('tool_result', {
+      toolName: 'read',
+      toolCallId: 'call_123',
+      content: 'File contents: user@email.com',
+    });
+
+    // Should return undefined because sharing is disabled
+    assert.strictEqual(result, undefined);
+  });
+
+  it('returns early when no recipient is configured', async () => {
+    process.env.PRIVACY_FILTER_SHARING_ENABLED = 'true';
+    delete process.env.PRIVACY_FILTER_RECIPIENT_ID;
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    const result = await shim.trigger('tool_result', {
+      toolName: 'read',
+      toolCallId: 'call_123',
+      content: 'File contents: user@email.com',
+    });
+
+    assert.strictEqual(result, undefined);
+
+    delete process.env.PRIVACY_FILTER_SHARING_ENABLED;
+  });
+
+  it('returns early when no PII is detected', async () => {
+    process.env.PRIVACY_FILTER_SHARING_ENABLED = 'true';
+    process.env.PRIVACY_FILTER_RECIPIENT_ID = 'recipient:alice';
+
+    mockPipeline.mockResults([]); // No PII detected
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    const result = await shim.trigger('tool_result', {
+      toolName: 'read',
+      toolCallId: 'call_123',
+      content: 'No sensitive data here',
+    });
+
+    assert.strictEqual(result, undefined);
+
+    delete process.env.PRIVACY_FILTER_SHARING_ENABLED;
+    delete process.env.PRIVACY_FILTER_RECIPIENT_ID;
+  });
+
+  it('returns unmodified content when sharing is allowed', async () => {
+    process.env.PRIVACY_FILTER_SHARING_ENABLED = 'true';
+    process.env.PRIVACY_FILTER_RECIPIENT_ID = 'recipient:alice';
+
+    mockPipeline.mockResults([
+      makeEntity('email', 'user@company.com'),
+    ]);
+
+    mockOpenFGA.shareCheckResult({
+      allowed: true,
+      modelCanShare: true,
+      lineageValid: true,
+      recipientCanView: true,
+      recipientTrusts: true,
+    });
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    const result = await shim.trigger('tool_result', {
+      toolName: 'read',
+      toolCallId: 'call_123',
+      content: 'Found email: user@company.com',
+    });
+
+    // Should return undefined because PII is allowed
+    assert.strictEqual(result, undefined);
+
+    delete process.env.PRIVACY_FILTER_SHARING_ENABLED;
+    delete process.env.PRIVACY_FILTER_RECIPIENT_ID;
+  });
+
+  it('returns masked content when sharing is denied (string content)', async () => {
+    process.env.PRIVACY_FILTER_SHARING_ENABLED = 'true';
+    process.env.PRIVACY_FILTER_RECIPIENT_ID = 'recipient:alice';
+
+    mockPipeline.mockResults([
+      makeEntity('email', 'user@company.com'),
+    ]);
+
+    mockOpenFGA.shareCheckResult({
+      allowed: false,
+      modelCanShare: false,
+      lineageValid: false,
+      recipientCanView: false,
+      recipientTrusts: false,
+    });
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    const result = await shim.trigger('tool_result', {
+      toolName: 'read',
+      toolCallId: 'call_123',
+      content: 'Found email: user@company.com',
+    });
+
+    // Should return modified content with masked PII
+    assert.ok(result !== undefined);
+    const maskedContent = result!.content as string;
+    assert.ok(maskedContent.includes('[EMAIL REDACTED]'));
+    assert.ok(!maskedContent.includes('user@company.com'));
+
+    delete process.env.PRIVACY_FILTER_SHARING_ENABLED;
+    delete process.env.PRIVACY_FILTER_RECIPIENT_ID;
+  });
+
+  it('returns masked content when sharing is denied (array content)', async () => {
+    process.env.PRIVACY_FILTER_SHARING_ENABLED = 'true';
+    process.env.PRIVACY_FILTER_RECIPIENT_ID = 'recipient:alice';
+
+    mockPipeline.mockResults([
+      makeEntity('email', 'user@company.com'),
+    ]);
+
+    mockOpenFGA.shareCheckResult({
+      allowed: false,
+      modelCanShare: false,
+      lineageValid: false,
+      recipientCanView: false,
+      recipientTrusts: false,
+    });
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    const result = await shim.trigger('tool_result', {
+      toolName: 'read',
+      toolCallId: 'call_123',
+      content: [{ type: 'text', text: 'Found email: user@company.com' }],
+    });
+
+    // Should return modified content with masked PII in array format
+    assert.ok(result !== undefined);
+    const contentArray = result!.content as Array<{ type: string; text: string }>;
+    const textBlock = contentArray.find(c => c.type === 'text');
+    assert.ok(textBlock !== undefined);
+    assert.ok(textBlock!.text.includes('[EMAIL REDACTED]'));
+    assert.ok(!textBlock!.text.includes('user@company.com'));
+
+    delete process.env.PRIVACY_FILTER_SHARING_ENABLED;
+    delete process.env.PRIVACY_FILTER_RECIPIENT_ID;
+  });
+
+  it('returns early when no model is configured', async () => {
+    process.env.PRIVACY_FILTER_SHARING_ENABLED = 'true';
+    process.env.PRIVACY_FILTER_RECIPIENT_ID = 'recipient:alice';
+
+    mockPipeline.mockResults([
+      makeEntity('email', 'user@company.com'),
+    ]);
+
+    const { default: piiExtension } = await importIndex(importCounter++);
+    piiExtension(shim.api);
+
+    // Set model to null
+    shim.ctx.model = null;
+
+    const result = await shim.trigger('tool_result', {
+      toolName: 'read',
+      toolCallId: 'call_123',
+      content: 'Found email: user@company.com',
+    });
+
+    assert.strictEqual(result, undefined);
+
+    shim.ctx.model = { id: 'test-model/1.0' }; // Reset
+    delete process.env.PRIVACY_FILTER_SHARING_ENABLED;
+    delete process.env.PRIVACY_FILTER_RECIPIENT_ID;
+  });
+});

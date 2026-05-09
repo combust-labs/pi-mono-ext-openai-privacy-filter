@@ -44,6 +44,14 @@ export type MessageEndEvent = {
   message: AgentMessage;
 };
 
+export type ToolResultEvent = {
+  toolName: string;
+  toolCallId: string;
+  content: string | Array<{ type: string; text: string }>;
+  details?: Record<string, unknown>;
+  isError?: boolean;
+};
+
 export type RegisteredRenderer = {
   id: string;
   fn: (message: { content: string }, context: { expanded: boolean }, theme: Record<string, (s: string, t: unknown) => string>) => unknown;
@@ -60,6 +68,7 @@ export type EventHandlers = {
   context: (event: ContextEvent, ctx: ShimContext) => Promise<{ messages: AgentMessage[] } | void>;
   session_start: (event: SessionStartEvent, ctx: ShimContext) => Promise<void>;
   message_end: (event: MessageEndEvent, ctx: ShimContext) => Promise<{ message: AgentMessage } | void>;
+  tool_result: (event: ToolResultEvent, ctx: ShimContext) => Promise<{ content?: string | Array<{ type: string; text: string }>; details?: Record<string, unknown>; isError?: boolean } | void>;
 };
 
 export type ShimContext = {
@@ -108,6 +117,7 @@ export function createShimExtensionAPI(): ShimExtensionAPI {
     context: [],
     session_start: [],
     message_end: [],
+    tool_result: [],
   };
 
   const ctx: ShimContext = {
@@ -168,7 +178,6 @@ export function createShimExtensionAPI(): ShimExtensionAPI {
       if (Array.isArray(handlers)) handlers.length = 0;
     }
     ctx.model = { id: 'test-model/1.0' };
-    eventHandlers.message_end = [];
   }
 
   return { api, ctx, sentMessages, registeredRenderers, registeredCommands, eventHandlers, reset, trigger, invokeCommand };
