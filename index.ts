@@ -160,50 +160,67 @@ export default function piiExtension(pi: ExtensionAPI) {
   });
 
   // Detect and mask PII in model output before sending to user (output direction)
+  //
+  // This handler implements the 4-way sharing authorization check:
+  //   1. model --can_share--> pii_instance    (is model authorized to share this PII?)
+  //   2. pii_instance --lineage--> model      (did this PII originate from this model?)
+  //   3. pii_instance --can_view--> recipient  (is recipient allowed to view this PII?)
+  //   4. recipient --can_receive_from--> model (does recipient trust this model?)
+  //
+  // If any check fails, the PII is masked before delivery.
+  //
+  // Environment variables:
+  //   PRIVACY_FILTER_SHARING_ENABLED - Set to "true" to enable output direction checks
+  //   PRIVACY_FILTER_RECIPIENT_ID    - The recipient ID (e.g., "user:alice")
   pi.on("message_end", async (event, ctx) => {
-    // Only process assistant messages
+    // Guard: Only process assistant messages (not user, system, or tool)
     if (event.message.role !== "assistant") return;
 
-    // Check if sharing is enabled
+    // Guard: Check if sharing authorization is enabled
+    // When disabled, no output direction checks are performed (input direction still works)
     if (!isSharingEnabled()) return;
 
-    // Get recipient ID for sharing checks
+    // Get the current recipient context for sharing checks
+    // This is set via PRIVACY_FILTER_RECIPIENT_ID environment variable
     const recipientId = getRecipientId();
     if (!recipientId) {
       console.log("[PRIVACY] PRIVACY_FILTER_RECIPIENT_ID not set — cannot perform sharing checks");
       return;
     }
 
-    // Extract text content from the message
+    // Extract text content from the assistant message for PII detection
     const content = extractText(event.message.content);
     if (!content || content.trim().length === 0) return;
 
-    // Initialize classifier and detect PII
+    // Detect PII entities in the model output using the Privacy Filter model
     const classifier = await initPipeline();
     const results = await classifier(content, { aggregation_strategy: "simple" });
     if (results.length === 0) return;
 
-    // Get model subject for authorization checks
+    // Get the model ID as the authorization subject
+    // The model is the principal attempting to share PII to the recipient
     const modelSubject = ctx.model?.id;
     if (!modelSubject) {
       console.log("[PRIVACY] No model configured — cannot perform sharing checks");
       return;
     }
 
-    // Perform 4-way sharing authorization check
-    // Returns set of categories that should be BLOCKED from sharing
+    // Perform the 4-way sharing authorization check via OpenFGA
+    // buildSharingDeniedCategoriesSet returns categories that should be BLOCKED
+    // (categories where ANY of the 4 checks failed)
     const deniedCategories = await buildSharingDeniedCategoriesSet(
       results,
       modelSubject,
       recipientId,
-      { checkRecipientTrust: true }
+      { checkRecipientTrust: true }  // Also verify recipient --can_receive_from--> model
     );
 
-    // Filter PII results to only those that are denied
+    // Filter to only PII entities whose categories are denied
     const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
-    if (piiToMask.length === 0) return;
+    if (piiToMask.length === 0) return;  // All PII is authorized — return unmodified
 
-    // Mask the denied PII and return modified message as text content block
+    // Mask denied PII and return modified message
+    // The message is returned to pi-mono, which replaces the original with our masked version
     const maskedContent = maskPII(content, piiToMask);
     return {
       message: {
@@ -214,28 +231,43 @@ export default function piiExtension(pi: ExtensionAPI) {
   });
 
   // Detect and mask PII in tool results before they are returned (output direction)
-  // This handles multi-agent scenarios where tool output may go to different recipients
+  //
+  // This handler is for multi-agent scenarios where tool output may be displayed
+  // to users or agents other than the calling model. It applies the same 4-way
+  // sharing authorization check as message_end:
+  //   1. model --can_share--> pii_instance    (is model authorized to share this PII?)
+  //   2. pii_instance --lineage--> model      (did this PII originate from this model?)
+  //   3. pii_instance --can_view--> recipient  (is recipient allowed to view this PII?)
+  //   4. recipient --can_receive_from--> model (does recipient trust this model?)
+  //
+  // Note: If the tool result stays within the same conversation (LLM sees it in next turn),
+  // the context handler will apply input direction checks instead. tool_result is only
+  // needed when the output goes to a different recipient.
+  //
+  // Environment variables:
+  //   PRIVACY_FILTER_SHARING_ENABLED - Set to "true" to enable sharing checks on tool results
+  //   PRIVACY_FILTER_RECIPIENT_ID    - The recipient ID (e.g., "user:alice")
   pi.on("tool_result", async (event, ctx) => {
-    // Check if sharing is enabled
+    // Guard: Check if sharing authorization is enabled
     if (!isSharingEnabled()) return;
 
-    // Get recipient ID for sharing checks
+    // Get the current recipient context for sharing checks
     const recipientId = getRecipientId();
     if (!recipientId) {
       console.log("[PRIVACY] PRIVACY_FILTER_RECIPIENT_ID not set — cannot perform sharing checks on tool result");
       return;
     }
 
-    // Extract text content from tool result
+    // Extract text content from tool result (handles both string and array formats)
     const content = extractToolResultText(event.content);
     if (!content || content.trim().length === 0) return;
 
-    // Initialize classifier and detect PII
+    // Detect PII entities in the tool output
     const classifier = await initPipeline();
     const results = await classifier(content, { aggregation_strategy: "simple" });
     if (results.length === 0) return;
 
-    // Get model subject for authorization checks
+    // Get the model ID as the authorization subject
     const modelSubject = ctx.model?.id;
     if (!modelSubject) {
       console.log("[PRIVACY] No model configured — cannot perform sharing checks on tool result");
@@ -243,7 +275,6 @@ export default function piiExtension(pi: ExtensionAPI) {
     }
 
     // Perform 4-way sharing authorization check
-    // Returns set of categories that should be BLOCKED from sharing
     const deniedCategories = await buildSharingDeniedCategoriesSet(
       results,
       modelSubject,
@@ -251,19 +282,19 @@ export default function piiExtension(pi: ExtensionAPI) {
       { checkRecipientTrust: true }
     );
 
-    // Filter PII results to only those that are denied
+    // Filter to only PII whose categories are denied
     const piiToMask = results.filter(r => deniedCategories.has(r.entity_group));
     if (piiToMask.length === 0) return;
 
     // Mask the denied PII
     const maskedContent = maskPII(content, piiToMask);
 
-    // Return modified tool result - preserve the original structure
-    // If original was a string, return string; if array, return array with masked text
+    // Return modified tool result, preserving the original structure
+    // Tool results can be either string or array of content blocks
     if (typeof event.content === 'string') {
       return { content: maskedContent };
     } else {
-      // It's an array of content blocks - mask the text blocks
+      // Map through content blocks and mask text blocks
       const maskedBlocks = event.content.map(block => {
         if (block.type === 'text') {
           return { ...block, text: maskPII(block.text || '', piiToMask) };
