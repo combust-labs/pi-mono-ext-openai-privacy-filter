@@ -8,6 +8,7 @@ import { getOpenFGAClient } from './openfga.ts';
 import { buildDeniedCategoriesSet, buildSharingDeniedCategoriesSet, isSharingEnabled, getRecipientId, type AggregatedAnnotation } from './privacy-auth.ts';
 import { logHealthCheckFailed, logAuthError } from './privacy-logger.ts';
 import { recordPiiDetected, recordFailClosed, startMetrics } from './privacy-metrics.ts';
+import { initTracing, shutdownTracing } from './privacy-tracing.ts';
 
 const DEFAULT_MODELS_PATH = "~/.cache/huggingface/hub/"
 const LOCAL_MODEL_PATH = process.env.PRIVACY_FILTER_MODEL_PATH || DEFAULT_MODELS_PATH;
@@ -25,6 +26,9 @@ type PIIAlertData = {
 export default function piiExtension(pi: ExtensionAPI) {
 
   let privacyPipeline: Awaited<ReturnType<typeof pipeline>> | null = null;
+
+  // Initialize OpenTelemetry tracing (only if OTEL is configured)
+  initTracing();
 
   // Register inline message renderer for PII alerts
   pi.registerMessageRenderer("pii-alert", (message, { expanded }, theme) => {
