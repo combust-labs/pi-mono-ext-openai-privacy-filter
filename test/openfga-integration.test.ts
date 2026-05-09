@@ -23,7 +23,11 @@ import assert from 'node:assert';
 import { createHash } from 'crypto';
 import { lookup } from 'node:dns';
 
-const runIntegrationTests = process.env.OPENFGA_INTEGRATION_TEST === 'true';
+// NOTE: These tests require a real OpenFGA server running at agent-openfga:8080
+// and will NOT run in CI environments. They are integration tests that verify
+// the full authorization flow with actual OpenFGA check/write operations.
+// To run locally: set OPENFGA_INTEGRATION_TEST=true
+export const runIntegrationTests = process.env.OPENFGA_INTEGRATION_TEST === 'true';
 
 if (!runIntegrationTests) {
   console.log('[INFO] Skipping OpenFGA integration tests (set OPENFGA_INTEGRATION_TEST=true to run)');
