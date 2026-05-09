@@ -27,6 +27,8 @@ All PII detection capabilities are derived directly from the [OpenAI Privacy Fil
 - **Authorization inspection**: `/check-pii-auth <text>` — detect PII and show per-entity ALLOWED/MASKED status based on OpenFGA policy
 - **Access dry-run**: `/check-pii-access <model-id> <category|sha256-hash>` — query OpenFGA directly to check if a model can view a category or literal
 - **Sharing authorization**: Control which models can share PII to which recipients with lineage verification
+  - **Output direction**: `message_end` event handler intercepts model responses before delivery to user
+  - **Tool output**: `tool_result` event handler applies sharing checks to tool execution results
 
 ## Installation
 
