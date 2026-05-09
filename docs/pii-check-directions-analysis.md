@@ -665,16 +665,16 @@ The following tasks are required to fully implement the Reverse PII Sharing Auth
 
 ### Documentation
 
-- [ ] **21. Update README.md**
-  - [ ] Document `message_end` handler implementation
-  - [ ] Document `PRIVACY_FILTER_SHARING_ENABLED`
-  - [ ] Document `PRIVACY_FILTER_RECIPIENT_ID`
-  - [ ] Add example tuple setup commands
+- [x] **21. Update README.md**
+  - [x] Document `message_end` handler implementation
+  - [x] Document `PRIVACY_FILTER_SHARING_ENABLED`
+  - [x] Document `PRIVACY_FILTER_RECIPIENT_ID`
+  - [x] Add example tuple setup commands
 
-- [ ] **22. Update inline code comments**
-  - [ ] Document 4-way check flow in `message_end` handler
-  - [ ] Document each check's purpose
-  - [ ] Document env var usage
+- [x] **22. Update inline code comments**
+  - [x] Document 4-way check flow in `message_end` handler
+  - [x] Document each check's purpose
+  - [x] Document env var usage
 
 ### Pre-deployment Verification
 
