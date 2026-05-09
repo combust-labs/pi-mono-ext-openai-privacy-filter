@@ -702,6 +702,9 @@ The following tasks are required to fully implement the Reverse PII Sharing Auth
 | `OPENFGA_STORE_ID` | Yes | OpenFGA store ID |
 | `OPENFGA_MODEL_ID` | Yes | Authorization model ID |
 | `OPENFGA_INTEGRATION_TEST` | Test only | Enable integration tests with real OpenFGA |
+| `OTEL_SERVICE_NAME` | No | OpenTelemetry service name (default: 'pi-privacy-filter') |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OTLP collector endpoint for trace export |
+| `OTEL_ENABLED` | No | Force enable OTEL tracing (`true`) |
 
 ---
 

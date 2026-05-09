@@ -160,6 +160,38 @@ pi -e ./index.ts
 
 Metrics are pushed every 30 seconds by default (configurable via `METRICS_PUSH_INTERVAL_MS`).
 
+### Tracing
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is configured, the extension sends distributed traces for PII authorization checks to an OpenTelemetry collector. This provides visibility into the authorization flow without exposing any PII data.
+
+**Trace spans include**:
+- `pii.input_check` — Input direction checks (model viewing PII)
+- `pii.output_check` — Output direction checks (model sharing PII to recipients)
+
+**Span attributes** (NO PII values ever exposed):
+| Attribute | Description |
+|-----------|-------------|
+| `pii.direction` | `input` or `output` |
+| `pii.model_id` | The model ID performing the check |
+| `pii.entity_count` | Number of PII entities detected |
+| `pii.categories` | Comma-separated category names (no values) |
+| `pii.result` | `allowed` or `denied` |
+| `pii.denied_count` | Number of entities that were denied |
+| `pii.openfga_available` | Whether OpenFGA was reachable |
+| `pii.check_duration_ms` | Duration of the check |
+| `pii.recipient_id` | Recipient ID (output checks only) |
+| `pii.lineage_valid` | Whether lineage check passed (output checks) |
+| `pii.recipient_trust_valid` | Whether recipient trusts model (output checks) |
+
+**Important**: No PII values (entity words, hashes, or content) are ever included in traces. Only authorization metadata is recorded.
+
+Send traces to an **OTEL Collector**:
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318/v1/traces \
+OTEL_SERVICE_NAME=pi-privacy-filter \
+pi -e ./index.ts
+```
+
 ## OpenFGA Authorization
 
 The extension supports fine-grained authorization via [OpenFGA](https://openfga.dev/) to control:
