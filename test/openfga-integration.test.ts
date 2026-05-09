@@ -21,7 +21,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import { createHash } from 'crypto';
-import { execSync } from 'child_process';
+import { lookup } from 'node:dns';
 
 const runIntegrationTests = process.env.OPENFGA_INTEGRATION_TEST === 'true';
 
@@ -29,18 +29,36 @@ if (!runIntegrationTests) {
   console.log('[INFO] Skipping OpenFGA integration tests (set OPENFGA_INTEGRATION_TEST=true to run)');
 }
 
-function resolveOpenFGAUrl(): string {
+// Synchronous fallback for URL construction (used at module load time before async is available)
+function getOpenFGAUrlSync(): string {
   const envUrl = process.env.OPENFGA_API_URL;
   if (envUrl) return envUrl;
-  try {
-    const ip = execSync(`getent hosts agent-openfga | awk '{print $1; exit}'`, { encoding: 'utf8' }).trim();
-    if (ip) return `http://${ip}:8080`;
-  } catch { /* fall back */ }
+  // Fallback to hostname (won't work in Docker without DNS resolution, but tests will fail fast)
   return "http://agent-openfga:8080";
 }
 
-const OPENFGA_API_URL = resolveOpenFGAUrl();
+let OPENFGA_API_URL = getOpenFGAUrlSync();
 const STORE_NAME = "privacy-integration-test";
+
+// Async URL resolver - resolves agent-openfga hostname to IP using Node.js DNS
+async function resolveOpenFGAUrl(): Promise<string> {
+  const envUrl = process.env.OPENFGA_API_URL;
+  if (envUrl) return envUrl;
+
+  // Use Node.js DNS lookup instead of shell command
+  // Resolve agent-openfga hostname to IP address
+  const hostname = 'agent-openfga';
+  try {
+    const addresses = await new Promise<import('node:dns').LookupAddress[]>((resolve, reject) => {
+      lookup(hostname, { all: true }, (err, addr) => err ? reject(err) : resolve(addr));
+    });
+    if (addresses.length > 0) {
+      return `http://${addresses[0].address}:8080`;
+    }
+  } catch { /* fall back */ }
+
+  return "http://agent-openfga:8080";
+}
 
 async function api(path: string, opts: RequestInit = {}): Promise<unknown> {
   const r = await fetch(`${OPENFGA_API_URL}${path}`, {
@@ -187,6 +205,9 @@ describe('OpenFGA Integration', { skip: !runIntegrationTests }, () => {
   const piiInstanceId = `pii_instance:sha256-${emailHash}`;
 
   before(async () => {
+    // Resolve OpenFGA URL (handles DNS lookup for agent-openfga hostname)
+    OPENFGA_API_URL = await resolveOpenFGAUrl();
+    console.log(`[SETUP] Using OpenFGA at ${OPENFGA_API_URL}`);
     console.log('\n[SETUP] Creating store and model...');
     storeId = (await createStore(STORE_NAME)).id;
     modelId = (await createModel(storeId)).id;
