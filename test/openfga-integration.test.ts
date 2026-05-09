@@ -64,17 +64,33 @@ async function resolveOpenFGAUrl(): Promise<string> {
   return "http://agent-openfga:8080";
 }
 
-async function api(path: string, opts: RequestInit = {}): Promise<unknown> {
-  const r = await fetch(`${OPENFGA_API_URL}${path}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', ...opts.headers },
-  });
-  if (!r.ok) {
-    const body = await r.text();
-    throw new Error(`OpenFGA ${path} (${r.status}): ${body}`);
+// Retry wrapper for API calls - handles transient network issues
+async function apiWithRetry(path: string, opts: RequestInit = {}, retries = 3, delayMs = 1000): Promise<unknown> {
+  let lastError: Error | null = null;
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch(`${OPENFGA_API_URL}${path}`, {
+        ...opts,
+        headers: { 'Content-Type': 'application/json', ...opts.headers },
+      });
+      if (!r.ok) {
+        const body = await r.text();
+        throw new Error(`OpenFGA ${path} (${r.status}): ${body}`);
+      }
+      return r.json();
+    } catch (e) {
+      lastError = e as Error;
+      if (i < retries - 1) {
+        console.log(`[RETRY] ${path} failed (attempt ${i + 1}/${retries}): ${lastError.message}`);
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+    }
   }
-  return r.json();
+  throw lastError;
 }
+
+// Alias for backward compatibility
+const api = apiWithRetry;
 
 async function cleanup(): Promise<void> {
   const stores = await api('/stores') as { stores: Array<{ id: string; name: string }> };
@@ -209,9 +225,27 @@ describe('OpenFGA Integration', { skip: !runIntegrationTests }, () => {
   const piiInstanceId = `pii_instance:sha256-${emailHash}`;
 
   before(async () => {
-    // Resolve OpenFGA URL (handles DNS lookup for agent-openfga hostname)
-    OPENFGA_API_URL = await resolveOpenFGAUrl();
-    console.log(`[SETUP] Using OpenFGA at ${OPENFGA_API_URL}`);
+    // Resolve OpenFGA URL with retry (handles DNS lookup for agent-openfga hostname)
+    let resolved = false;
+    for (let i = 0; i < 3 && !resolved; i++) {
+      try {
+        OPENFGA_API_URL = await resolveOpenFGAUrl();
+        console.log(`[SETUP] Using OpenFGA at ${OPENFGA_API_URL}`);
+        
+        // Test connectivity
+        await api('/healthz');
+        resolved = true;
+        console.log('[SETUP] OpenFGA connection verified');
+      } catch (e) {
+        console.log(`[SETUP] Connection attempt ${i + 1}/3 failed: ${(e as Error).message}`);
+        if (i < 2) await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+    
+    if (!resolved) {
+      throw new Error('Failed to connect to OpenFGA after 3 attempts');
+    }
+    
     console.log('\n[SETUP] Creating store and model...');
     storeId = (await createStore(STORE_NAME)).id;
     modelId = (await createModel(storeId)).id;
