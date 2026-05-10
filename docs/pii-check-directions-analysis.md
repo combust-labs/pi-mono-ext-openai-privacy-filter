@@ -452,14 +452,13 @@ Based on analysis of `index.ts`, `openfga.ts`, and `privacy-auth.ts`:
 
 **Note**: Current implementation correctly uses only the required events.
 
-### Output Direction (LLM → User) ❌ NOT IMPLEMENTED
+### Output Direction (LLM → User) ✅ IMPLEMENTED
 
 | Event | Status | Implementation Details |
 |-------|--------|------------------------|
-| `message_end` | ❌ NOT IMPLEMENTED | **Primary hook - only event strictly required** |
-| `tool_result` | ❌ NOT IMPLEMENTED | Optional - needed only if tool output goes to users/agents | |
+| `message_end` | ✅ IMPLEMENTED | **Primary hook - only event strictly required** |
+| `tool_result` | ❌ NOT IMPLEMENTED | Optional - needed only if tool output goes to users/agents |
 | `message_update` | ❌ NOT IMPLEMENTED | Not required - `message_end` is sufficient |
-| `tool_result` | ❌ NOT IMPLEMENTED | Not required for user-facing output |
 
 **Available but Not Used:**
 - `buildSharingDeniedCategoriesSet()` in `privacy-auth.ts` ✅ Ready
@@ -499,13 +498,14 @@ pi.on("message_end", async (event, ctx) => {
 index.ts:
   ✅ before_agent_start handler - Input PII checks (current prompt)
   ✅ context handler - Input PII checks (history)
-  ❌ message_end handler - MISSING (only event needed for output)
+  ✅ message_end handler - Output PII checks (sharing authorization)
 
 privacy-auth.ts:
-  ✅ buildDeniedCategoriesSet() - Input direction (ready)
-  ✅ buildSharingDeniedCategoriesSet() - Output direction (ready but not called)
-  ✅ checkSharingAuthorization() - Per-entity sharing (ready but not called)
-  ✅ isSharingEnabled() - Gating function (ready but not used)
+  ✅ buildDeniedCategoriesSet() - Input direction authorization
+  ✅ buildSharingDeniedCategoriesSet() - Output direction authorization
+  ✅ checkSharingAuthorization() - Per-entity sharing check
+  ✅ isSharingEnabled() - Gating function
+  ✅ getRecipientId() - Recipient ID retrieval
 
 openfga.ts:
   ✅ check() - Basic can_view checks
@@ -523,6 +523,188 @@ openfga.ts:
 3. **Don't need** `input` or `before_provider_request` for input direction
 4. **Don't need** `message_start`, `message_update`, or `tool_result` for output direction
 5. **Environment variables** `PRIVACY_FILTER_RECIPIENT_ID` and `PRIVACY_FILTER_SHARING_ENABLED` exist but need wiring to the new `message_end` handler
+
+---
+
+---
+
+## Implementation Task List
+
+The following tasks are required to fully implement the Reverse PII Sharing Authorization feature.
+
+### Core Implementation
+
+- [x] **1. Implement `message_end` handler in `index.ts`**
+  - [x] Add event listener for `message_end` event
+  - [x] Check `event.message.role === "assistant"` guard
+  - [x] Extract text content from `event.message.content`
+  - [x] Return early if no content or non-assistant message
+
+- [x] **2. Wire sharing enabled check**
+  - [x] Call `isSharingEnabled()` at start of handler
+  - [x] Return early if sharing is disabled
+  - [x] Verify `PRIVACY_FILTER_SHARING_ENABLED` env var is read at call time (not import time)
+
+- [x] **3. Wire recipient ID**
+  - [x] Call `getRecipientId()` to get current recipient
+  - [x] Return early with error log if no recipient configured
+  - [x] Verify `PRIVACY_FILTER_RECIPIENT_ID` env var handling
+
+- [x] **4. Implement PII detection**
+  - [x] Run `classifier(content, { aggregation_strategy: "simple" })`
+  - [x] Handle empty results (no PII found)
+  - [x] Get `modelSubject` from `ctx.model?.id`
+
+- [x] **5. Implement 4-way sharing authorization check**
+  - [x] Call `buildSharingDeniedCategoriesSet(results, modelSubject, recipientId, { checkRecipientTrust: true })`
+  - [x] Filter PII results to only those in denied categories
+  - [x] Handle case where all PII is allowed
+
+- [x] **6. Implement PII masking**
+  - [x] Call `maskPII(content, piiToMask)` with denied PII items
+  - [x] Return modified message via `{ message: { ...event.message, content: maskedContent } }`
+  - [x] Handle case where no masking needed (return undefined)
+
+### Helper Functions (Verify Existing Implementation)
+
+- [x] **7. Verify `isSharingEnabled()` in `privacy-auth.ts`**
+  - [x] Reads `PRIVACY_FILTER_SHARING_ENABLED` env var
+  - [x] Returns `true` only when explicitly `"true"`
+  - [x] Returns `false` for missing/unset values
+  - [x] Called at runtime, not at module import time
+
+- [x] **8. Verify `getRecipientId()` in `privacy-auth.ts`**
+  - [x] Reads `PRIVACY_FILTER_RECIPIENT_ID` env var
+  - [x] Returns formatted recipient ID (e.g., `recipient:alice`)
+  - [x] Handles missing value gracefully
+
+- [x] **9. Verify `buildSharingDeniedCategoriesSet()` signature**
+  - [x] Accepts `results` array from classifier
+  - [x] Accepts `modelSubject` (model instance ID)
+  - [x] Accepts `recipientId`
+  - [x] Accepts options object with `checkRecipientTrust` flag
+  - [x] Returns `Set<string>` of denied category names
+
+- [x] **10. Verify `maskPII()` utility**
+  - [x] Accepts content string and PII results array
+  - [x] Returns masked content string
+  - [x] Handles multiple PII types correctly
+
+### OpenFGA Integration
+
+- [x] **11. Verify `checkShare()` in `openfga.ts`**
+  - [x] Performs 4-way check:
+    - [x] `model --can_share--> pii_instance`
+    - [x] `pii_instance --lineage--> model`
+    - [x] `recipient --can_view--> pii_instance`
+    - [x] `recipient --can_receive_from--> model`
+  - [x] Returns proper result type with `allowed: boolean`
+  - [x] Handles batch checking via `batchCheckShare()`
+
+- [x] **12. Verify `buildPIIInstanceId()`**
+  - [x] Computes SHA256 hash of literal
+  - [x] Truncates to 40 hex characters
+  - [x] Prefixes with `pii_instance:sha256-`
+  - [x] Detects existing 40-char hashes and doesn't double-hash
+
+- [x] **13. Verify OpenFGA model relationships**
+  - [x] `can_share` relation on `model_instance` type
+  - [x] `lineage` relation on both `model_instance` and `pii_instance`
+  - [x] `can_view` relation on `recipient` type
+  - [x] `can_receive_from` relation on `recipient` type
+  - [x] `directly_related_user_types` includes both types where needed
+
+### OpenFGA Tuples (Test Data Setup)
+
+- [x] **14. Create test tuples for sharing authorization**
+  - [x] Model-to-PII sharing tuple: `model_instance:<id>#can_share@pii_instance:<hash>`
+  - [x] PII lineage tuple: `pii_instance:<hash>#lineage@model_instance:<id>`
+  - [x] Recipient viewing tuple: `recipient:<id>#can_view@pii_instance:<hash>`
+  - [x] Recipient trust tuple: `recipient:<id>#can_receive_from@model_instance:<id>`
+
+- [x] **15. Verify tuple direction for cross-type checks**
+  - [x] OpenFGA reverses tuples for cross-type relations
+  - [x] Write direction matches check direction
+  - [x] Test `checkShare()` with actual OpenFGA instance
+
+### Testing
+
+- [x] **16. Unit tests for `message_end` handler**
+  - [x] Test assistant message passes through
+  - [x] Test non-assistant message returns early
+  - [x] Test sharing disabled returns early
+  - [x] Test no PII detected returns early
+  - [x] Test PII detected and allowed passes through
+  - [x] Test PII detected and denied returns masked content
+
+- [x] **17. Unit tests for `buildSharingDeniedCategoriesSet()`**
+  - [x] Test all 4 checks pass → empty set (no denied categories)
+  - [x] Test `can_share` fails → category denied
+  - [x] Test `lineage` fails → category denied
+  - [x] Test `recipient can_view` fails → category denied
+  - [x] Test `recipient trust` fails → category denied
+  - [x] Test `checkRecipientTrust: false` skips trust check
+
+- [x] **18. Integration tests with real OpenFGA**
+  - [x] Test `message_end` with actual OpenFGA instance
+  - [x] Test 4-way sharing check with real tuples
+  - [x] Verify masking behavior end-to-end
+  - [x] Run with `OPENFGA_INTEGRATION_TEST=true`
+
+### Optional: Enhanced Scenarios
+
+- [x] **19. Implement `tool_result` handler (multi-agent scenarios)**
+  - [x] Detect when tool result will go to different user/agent
+  - [x] Apply output direction checks (`can_share`)
+  - [x] Return modified `content` in `tool_result` handler
+
+- [ ] **20. Implement streaming detection via `message_update`**
+  - [ ] Track PII detected so far
+  - [ ] Set flag to mask at `message_end` if needed
+  - [ ] Consider partial hash computation challenges
+
+### Documentation
+
+- [x] **21. Update README.md**
+  - [x] Document `message_end` handler implementation
+  - [x] Document `PRIVACY_FILTER_SHARING_ENABLED`
+  - [x] Document `PRIVACY_FILTER_RECIPIENT_ID`
+  - [x] Add example tuple setup commands
+
+- [x] **22. Update inline code comments**
+  - [x] Document 4-way check flow in `message_end` handler
+  - [x] Document each check's purpose
+  - [x] Document env var usage
+
+### Pre-deployment Verification
+
+- [x] **23. All existing tests pass**
+  - [x] Run `npm test` and verify 155+ tests pass
+  - [x] No regressions in existing functionality
+
+- [x] **24. New tests pass**
+  - [x] All new unit tests pass
+  - [x] Integration tests pass with `OPENFGA_INTEGRATION_TEST=true`
+
+- [ ] **25. Manual verification**
+  - [ ] Verify input direction still works
+  - [ ] Verify output direction blocks PII when sharing disabled
+  - [ ] Verify output direction allows PII when 4-way check passes
+  - [ ] Verify OpenFGA tuples are created correctly
+
+### Environment Variables Summary
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `PRIVACY_FILTER_SHARING_ENABLED` | Yes (for output) | Enable output direction PII checks |
+| `PRIVACY_FILTER_RECIPIENT_ID` | Yes (for output) | Current recipient for sharing checks |
+| `OPENFGA_API_URL` | Yes | OpenFGA server URL |
+| `OPENFGA_STORE_ID` | Yes | OpenFGA store ID |
+| `OPENFGA_MODEL_ID` | Yes | Authorization model ID |
+| `OPENFGA_INTEGRATION_TEST` | Test only | Enable integration tests with real OpenFGA |
+| `OTEL_SERVICE_NAME` | No | OpenTelemetry service name (default: 'pi-privacy-filter') |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | OTLP collector endpoint for trace export |
+| `OTEL_ENABLED` | No | Force enable OTEL tracing (`true`) |
 
 ---
 
