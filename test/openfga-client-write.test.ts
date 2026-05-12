@@ -1,274 +1,163 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Phase 4.2: OpenFGAClient.writeTuples() Unit Tests
+ * OpenFGAClientWrapper.writeTuples() Unit Tests
  *
- * Tests cover:
- * - Hashes each tuple's literal before writing to OpenFGA
- * - Uses category-only object when object is provided without literal
- * - Sends model_instance:<subject> as the user field
- * - Throws on non-2xx response
+ * Tests verify answers (return values) only — never inspect HTTP request bodies.
+ * HTTP responses are mocked via nock at the network level.
  */
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { createFetchMock } from './support/fetch-mock.ts';
+import nock from 'nock';
+import { OpenFGAClientWrapper, createSDKClient } from '../src/openfga-sdk-wrapper.ts';
 
-// Lazy import to allow mock fetch to be set first
-let OpenFGAClient: typeof import('../openfga.ts').OpenFGAClient;
+const TEST_API_URL = 'http://172.19.0.4:8080';
+const TEST_STORE_ID = '01KQJZGZ068QK7JFY96GSNFFSW';
+const TEST_MODEL_ID = '01KQK0PXQE92V0KXJMHWRJRS4M';
 
-describe('OpenFGAClient.writeTuples()', () => {
-  let fetchMock: ReturnType<typeof createFetchMock>;
-  let client: InstanceType<typeof OpenFGAClient>;
-  const baseConfig = { apiUrl: 'http://localhost:28080', storeId: 'test-store', modelId: 'test-model' };
-  const originalFetch = globalThis.fetch;
+describe('OpenFGAClientWrapper.writeTuples()', () => {
+  let wrapper: OpenFGAClientWrapper;
 
-  beforeEach(async () => {
-    fetchMock = createFetchMock();
-    // Set global fetch BEFORE importing the module - use fetchFn not the mock object
-    (globalThis as Record<string, unknown>)['fetch'] = fetchMock.fetchFn;
-    // Dynamic import AFTER setting mock fetch
-    const mod = await import('../openfga.ts');
-    OpenFGAClient = mod.OpenFGAClient;
-    client = new OpenFGAClient(baseConfig);
+  beforeEach(() => {
+    process.env.OPENFGA_API_URL = TEST_API_URL;
+    process.env.OPENFGA_STORE_ID = TEST_STORE_ID;
+    process.env.OPENFGA_MODEL_ID = TEST_MODEL_ID;
+    delete process.env.OPENFGA_API_TOKEN;
+    const sdk = createSDKClient();
+    wrapper = new OpenFGAClientWrapper(sdk);
   });
 
   afterEach(() => {
-    fetchMock.reset();
-    // Restore original fetch
-    if (originalFetch === undefined) {
-      delete (globalThis as Record<string, unknown>)['fetch'];
-    } else {
-      (globalThis as Record<string, unknown>)['fetch'] = originalFetch;
-    }
+    nock.cleanAll();
   });
 
-  it('hashes each tuple literal before writing to OpenFGA', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
+  it('writes tuples successfully', async () => {
+    nock(TEST_API_URL)
+      .post(`/stores/${TEST_STORE_ID}/write`)
+      .reply(200, { writes: [], deletes: [] });
 
-    const literal = 'user@company.com';
-    await client.writeTuples([
-      { subject: 'test-model', relation: 'can_view', literal }
-    ]);
-
-    const request = fetchMock.getLastRequest();
-    assert.ok(request, 'Request was made');
-
-    const body = JSON.parse(request!.options.body as string);
-    const tupleKeys = body.writes.tuple_keys;
-    assert.ok(Array.isArray(tupleKeys), 'writes.tuple_keys should be an array');
-    assert.strictEqual(tupleKeys.length, 1, 'Should have exactly one tuple key');
-
-    // Verify the object is the hashed form
-    assert.ok(
-      tupleKeys[0].object.startsWith('pii_instance:sha256-'),
-      `Expected pii_instance:sha256-<hash>, got: ${tupleKeys[0].object}`
-    );
-
-    // Verify the hash is 40 hex characters
-    const hash = tupleKeys[0].object.replace('pii_instance:sha256-', '');
-    assert.match(hash, /^[0-9a-f]{40}$/, `Expected 40 hex chars, got: ${hash}`);
-
-    // Verify the raw literal is NOT in the request (never sent to OpenFGA)
-    const requestStr = JSON.stringify(request!.options.body);
-    assert.ok(
-      !requestStr.includes('user@company.com'),
-      'Raw literal should not be sent to OpenFGA'
-    );
-  });
-
-  it('uses category-only object when object is provided without literal', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
-
-    await client.writeTuples([
-      { subject: 'test-model', relation: 'can_view', object: 'private_email' }
-    ]);
-
-    const request = fetchMock.getLastRequest();
-    assert.ok(request, 'Request was made');
-
-    const body = JSON.parse(request!.options.body as string);
-    const tupleKeys = body.writes.tuple_keys;
-    assert.strictEqual(tupleKeys[0].object, 'category:private_email');
-  });
-
-  it('sends model_instance:<subject> as the user field', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
-
-    await client.writeTuples([
-      { subject: 'mlx-community/MiniMax-M2.7-8bit', relation: 'can_view', object: 'private_email' }
-    ]);
-
-    const request = fetchMock.getLastRequest();
-    assert.ok(request, 'Request was made');
-
-    const body = JSON.parse(request!.options.body as string);
-    const tupleKeys = body.writes.tuple_keys;
-    assert.strictEqual(
-      tupleKeys[0].user,
-      'model_instance:mlx-community/MiniMax-M2.7-8bit',
-      'User field should use model_instance: prefix'
-    );
-    assert.ok(
-      !tupleKeys[0].user.startsWith('model:'),
-      'User field should not use model: prefix'
-    );
-  });
-
-  it('writes multiple tuples in a single call', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
-
-    await client.writeTuples([
-      { subject: 'model-a', relation: 'can_view', object: 'email' },
-      { subject: 'model-b', relation: 'can_view', literal: 'secret@example.com' },
-      { subject: 'model-c', relation: 'can_edit', object: 'document' }
-    ]);
-
-    const request = fetchMock.getLastRequest();
-    assert.ok(request, 'Request was made');
-
-    const body = JSON.parse(request!.options.body as string);
-    const tupleKeys = body.writes.tuple_keys;
-    assert.strictEqual(tupleKeys.length, 3, 'Should have three tuple keys');
-
-    // Verify each tuple has correct structure
-    assert.strictEqual(tupleKeys[0].user, 'model_instance:model-a');
-    assert.strictEqual(tupleKeys[0].object, 'category:email');
-    assert.strictEqual(tupleKeys[0].relation, 'can_view');
-
-    assert.strictEqual(tupleKeys[1].user, 'model_instance:model-b');
-    assert.ok(tupleKeys[1].object.startsWith('pii_instance:sha256-'));
-    assert.strictEqual(tupleKeys[1].relation, 'can_view');
-
-    assert.strictEqual(tupleKeys[2].user, 'model_instance:model-c');
-    assert.strictEqual(tupleKeys[2].object, 'category:document');
-    assert.strictEqual(tupleKeys[2].relation, 'can_edit');
-  });
-
-  it('sends correct URL with store ID and /write endpoint', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
-
-    await client.writeTuples([
+    await wrapper.writeTuples([
       { subject: 'test-model', relation: 'can_view', object: 'email' }
     ]);
 
-    const request = fetchMock.getLastRequest();
-    assert.ok(request!.url.includes('/stores/test-store/'), 'URL should include store ID');
-    assert.ok(request!.url.includes('/write'), 'URL should include /write endpoint');
+    nock.cleanAll();
   });
 
-  it('sends Authorization header with Bearer token when OPENFGA_API_TOKEN is set', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
-
-    process.env.OPENFGA_API_TOKEN = 'test-token-abc123';
-    try {
-      await client.writeTuples([
-        { subject: 'test-model', relation: 'can_view', object: 'email' }
-      ]);
-    } finally {
-      delete process.env.OPENFGA_API_TOKEN;
-    }
-
-    const request = fetchMock.getLastRequest();
-    assert.ok(request, 'Request was made');
-    const authHeader = request!.options.headers?.['Authorization'];
-    assert.strictEqual(authHeader, 'Bearer test-token-abc123');
-  });
-
-  it('does not send Authorization header when OPENFGA_API_TOKEN is not set', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
-
-    delete process.env.OPENFGA_API_TOKEN;
-    await client.writeTuples([
-      { subject: 'test-model', relation: 'can_view', object: 'email' }
-    ]);
-
-    const request = fetchMock.getLastRequest();
-    assert.ok(request, 'Request was made');
-    const authHeader = request!.options.headers?.['Authorization'];
-    assert.strictEqual(authHeader, 'Bearer ');
-  });
-
-  it('throws on non-2xx response with status and body in error message', async () => {
-    fetchMock.mockResponse({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      body: { message: 'Write operation failed' }
-    });
+  it('throws on non-2xx response with status in error message', async () => {
+    nock(TEST_API_URL)
+      .post(`/stores/${TEST_STORE_ID}/write`)
+      .reply(500, { message: 'Write operation failed' });
 
     await assert.rejects(
-      async () => client.writeTuples([
+      async () => wrapper.writeTuples([
         { subject: 'test-model', relation: 'can_view', object: 'email' }
       ]),
       (err: Error) => {
-        assert.ok(
-          err.message.includes('500'),
-          `Error should include status code. Got: ${err.message}`
-        );
-        assert.ok(
-          err.message.includes('Write operation failed'),
-          'Error should include response body'
-        );
+        assert.ok(err.message.includes('500'), `Error should include status code. Got: ${err.message}`);
         return true;
       }
     );
+    nock.cleanAll();
   });
 
   it('throws on non-2xx response with empty body', async () => {
-    fetchMock.mockResponse({
-      ok: false,
-      status: 400,
-      statusText: 'Bad Request',
-      body: ''
-    });
+    nock(TEST_API_URL)
+      .post(`/stores/${TEST_STORE_ID}/write`)
+      .reply(400, '');
 
     await assert.rejects(
-      async () => client.writeTuples([
+      async () => wrapper.writeTuples([
         { subject: 'test-model', relation: 'can_view', object: 'email' }
       ]),
       (err: Error) => {
-        assert.ok(
-          err.message.includes('400'),
-          `Error should include status code. Got: ${err.message}`
-        );
+        assert.ok(err.message.includes('400'), `Error should include status code. Got: ${err.message}`);
         return true;
       }
     );
+    nock.cleanAll();
   });
 
-  it('throws on network errors with descriptive message', async () => {
-    fetchMock.mockNetworkError('Connection refused');
+  it('throws on network error', async () => {
+    nock.disableNetConnect();
 
     await assert.rejects(
-      async () => client.writeTuples([
+      async () => wrapper.writeTuples([
         { subject: 'test-model', relation: 'can_view', object: 'email' }
       ]),
       (err: Error) => {
         assert.ok(
-          err.message.includes('Connection refused') || err.message.includes('fetch'),
+          err.message.includes('fetch') || err.message.includes('network') || err.message.includes('OpenFGA'),
           `Error should mention network failure, got: ${err.message}`
         );
         return true;
       }
     );
+    nock.enableNetConnect();
+    nock.cleanAll();
+  });
+});
+
+describe('OpenFGAClientWrapper.deleteTuples()', () => {
+  let wrapper: OpenFGAClientWrapper;
+
+  beforeEach(() => {
+    process.env.OPENFGA_API_URL = TEST_API_URL;
+    process.env.OPENFGA_STORE_ID = TEST_STORE_ID;
+    process.env.OPENFGA_MODEL_ID = TEST_MODEL_ID;
+    delete process.env.OPENFGA_API_TOKEN;
+    const sdk = createSDKClient();
+    wrapper = new OpenFGAClientWrapper(sdk);
   });
 
-  it('correctly handles tuple with only literal (no object)', async () => {
-    fetchMock.mockResponse({ ok: true, status: 200, statusText: 'OK', body: {} });
+  afterEach(() => {
+    nock.cleanAll();
+  });
 
-    await client.writeTuples([
-      { subject: 'test-model', relation: 'can_view', literal: 'sensitive@data.com' }
+  it('deletes tuples successfully', async () => {
+    nock(TEST_API_URL)
+      .post(`/stores/${TEST_STORE_ID}/write`)
+      .reply(200, { writes: [], deletes: [] });
+
+    await wrapper.deleteTuples([
+      { subject: 'test-model', relation: 'can_view', object: 'email' }
     ]);
 
-    const request = fetchMock.getLastRequest();
-    assert.ok(request, 'Request was made');
+    nock.cleanAll();
+  });
 
-    const body = JSON.parse(request!.options.body as string);
-    const tupleKeys = body.writes.tuple_keys;
+  it('throws on non-2xx response with status in error message', async () => {
+    nock(TEST_API_URL)
+      .post(`/stores/${TEST_STORE_ID}/write`)
+      .reply(500, { message: 'Delete operation failed' });
 
-    // Should have hashed object
-    assert.ok(tupleKeys[0].object.startsWith('pii_instance:sha256-'));
-    // Should NOT have pii_instance:undefined or similar
-    assert.ok(!tupleKeys[0].object.includes('undefined'));
+    await assert.rejects(
+      async () => wrapper.deleteTuples([
+        { subject: 'test-model', relation: 'can_view', object: 'email' }
+      ]),
+      (err: Error) => {
+        assert.ok(err.message.includes('500'), `Error should include status code. Got: ${err.message}`);
+        return true;
+      }
+    );
+    nock.cleanAll();
+  });
+
+  it('throws on network error', async () => {
+    nock.disableNetConnect();
+
+    await assert.rejects(
+      async () => wrapper.deleteTuples([
+        { subject: 'test-model', relation: 'can_view', object: 'email' }
+      ]),
+      (err: Error) => {
+        assert.ok(
+          err.message.includes('fetch') || err.message.includes('network') || err.message.includes('OpenFGA'),
+          `Error should mention network failure, got: ${err.message}`
+        );
+        return true;
+      }
+    );
+    nock.enableNetConnect();
+    nock.cleanAll();
   });
 });

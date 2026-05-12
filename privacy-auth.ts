@@ -13,7 +13,7 @@
  * from the model attempting to share it.
  */
 
-import { getOpenFGAClient, hashLiteral, buildPIIInstanceId, buildRecipientId } from './openfga.ts';
+import { getOpenFGAClient, hashLiteral, buildPIIInstanceId, buildRecipientId } from './src/openfga-sdk-wrapper.ts';
 import {
   logCategoryAllowed,
   logCategoryDenied,
