@@ -99,10 +99,11 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 |---------------------|---------|-------------|
 | `PRIVACY_FILTER_MODEL_PATH` | `~/.cache/huggingface/hub/` | Base local path for model lookup |
 | `PRIVACY_FILTER_WEBGPU` | `false` | Enable WebGPU acceleration (`true`/`false`) |
-| `OPENFGA_API_URL` | `http://localhost:28080` | OpenFGA REST API URL |
-| `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID (override with the ULID from `openfga-init.sh`) |
-| `OPENFGA_MODEL_ID` | `privacy-model` | OpenFGA authorization model ID (override with the ULID from `openfga-init.sh`) |
+| `OPENFGA_API_URL` | _(required)_ | OpenFGA REST API URL. In the harness: `http://172.19.0.4:8080`. On host/CI: use testcontainers (auto-detected) or set explicitly. |
+| `OPENFGA_STORE_ID` | _(required)_ | OpenFGA store ID (ULID). Created automatically if not provided. |
+| `OPENFGA_MODEL_ID` | _(required)_ | OpenFGA authorization model ID (ULID). Created automatically if not provided. |
 | `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
+| `OPENFGA_CONTAINER_IMAGE` | `docker.io/openfga/openfga:<latest-release>` | Docker image for testcontainers (integration tests only). Override to pin a specific version. |
 | `PRIVACY_FILTER_RECIPIENT_ID` | _(empty)_ | Recipient ID for sharing checks (e.g., `user:alice`) |
 | `PRIVACY_FILTER_SHARING_ENABLED` | `false` | Enable sharing authorization checks (`true`/`false`) |
 | `METRICS_ENABLED` | _(empty)_ | Enable OTLP/Prometheus metrics push (`true`) — requires an endpoint to be set |
@@ -396,7 +397,7 @@ If OpenFGA is unreachable or returns an error, the extension **fail-closes** —
 Error: OpenFGA check failed: fetch failed: Connection refused
 ```
 - Ensure OpenFGA is running: `docker ps | grep openfga`
-- Check that `OPENFGA_API_URL` is set correctly (defaults to `http://localhost:28080` for runtime use; must be set for tests)
+- Check that `OPENFGA_API_URL` is set correctly
 
 **Store not found (404)**
 ```
@@ -422,9 +423,9 @@ Error: OpenFGA check failed (404):
 - Check store ID and model ID are correct
 
 **Tests fail with `OPENFGA_API_URL env var is required for tests`**
-- The test harness must set `OPENFGA_API_URL` before running `npm test`
-- In the harness container: the env var is provided automatically
-- On the host or in CI: integration tests use testcontainers to spin up a temporary OpenFGA container on a random port — set `USE_TESTCONTAINERS=true` or ensure `OPENFGA_API_URL` is unset
+- Unit tests require `OPENFGA_API_URL` to be set at load time — they throw if absent
+- The test harness provides it automatically at `http://172.19.0.4:8080`
+- On the host or in CI: run integration tests separately with `OPENFGA_INTEGRATION_TEST=true npm test` — testcontainers handles the URL automatically
 
 ## Testing
 
@@ -436,7 +437,7 @@ Unit tests use [nock](https://github.com/nock/nock) to mock HTTP responses — n
 npm test
 ```
 
-`OPENFGA_API_URL` must be set (provided by the test harness in the container; must be set explicitly on the host). Tests fail fast at load time if the env var is absent.
+`OPENFGA_API_URL` must be set (provided by the harness in the container). On the host or in CI without a harness, use `OPENFGA_INTEGRATION_TEST=true npm test` — testcontainers provides the URL automatically. Without that flag, tests throw `OPENFGA_API_URL env var is required for tests` at load time.
 
 ### Integration Tests
 
