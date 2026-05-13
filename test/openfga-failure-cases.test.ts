@@ -22,7 +22,7 @@ import {
   buildModelInstanceId,
 } from '../src/openfga-sdk-wrapper.ts';
 
-const TEST_API_URL = 'http://172.19.0.4:8080';
+const TEST_API_URL = process.env.OPENFGA_API_URL || 'http://172.19.0.4:8080';
 const TEST_STORE_ID = '01KQJZGZ068QK7JFY96GSNFFSW';
 const TEST_MODEL_ID = '01KQK0PXQE92V0KXJMHWRJRS4M';
 
