@@ -26,9 +26,10 @@
 import { createHash } from 'crypto';
 import nock from 'nock';
 import assert from 'node:assert';
-import { createHash } from 'crypto';
-import { createRequire } from 'node:module';
 import { lookup } from 'node:dns';
+import { createRequire } from 'node:module';
+import { after, before, describe, it } from 'node:test';
+import { GenericContainer, StartedTestContainer, type, Wait } from 'testcontainers';
 import { ulid } from 'ulidx';
 
 /** Fallback ULID used when the harness does not provide the store/model IDs.
@@ -39,9 +40,6 @@ import { ulid } from 'ulidx';
  */
 const FALLBACK_STORE_ID = ulid();
 const FALLBACK_MODEL_ID = ulid();
-import { after, before, describe, it } from 'node:test';
-import { GenericContainer, StartedTestContainer, type, Wait } from 'testcontainers';
-
 // ---------------------------------------------------------------------------
 // Environment detection
 // ---------------------------------------------------------------------------
@@ -424,8 +422,8 @@ before(async function () {
 
   // Create store and model
   console.log('[SETUP] Creating store and model...');
-  const storeId = (await createStore(STORE_NAME)).id;
-  const modelId = (await createModel(storeId ?? FALLBACK_STORE_ID)).id;
+  const storeId = (await createStore(STORE_NAME));
+  const modelId = (await createModel(storeId ?? FALLBACK_STORE_ID));
   process.env.OPENFGA_STORE_ID = storeId;
   process.env.OPENFGA_MODEL_ID = modelId;
   console.log(`[SETUP] store=${storeId}, model=${modelId}\n`);
