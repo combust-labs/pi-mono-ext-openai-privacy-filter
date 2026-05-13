@@ -11,7 +11,13 @@ import assert from 'node:assert';
 import nock from 'nock';
 import { OpenFGAClientWrapper, createSDKClient } from '../src/openfga-sdk-wrapper.ts';
 
-const TEST_API_URL = process.env.OPENFGA_API_URL || 'http://172.19.0.4:8080';
+// NOTE: TEST_API_URL must be set via OPENFGA_API_URL env var.
+// There is no fallback — tests fail fast if the env var is absent.
+const TEST_API_URL = (() => {
+  const url = process.env.OPENFGA_API_URL;
+  if (!url) throw new Error('OPENFGA_API_URL env var is required for tests');
+  return url;
+})();
 const TEST_STORE_ID = '01KQJZGZ068QK7JFY96GSNFFSW';
 const TEST_MODEL_ID = '01KQK0PXQE92V0KXJMHWRJRS4M';
 
