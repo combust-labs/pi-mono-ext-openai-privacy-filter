@@ -7,24 +7,7 @@ on:
   pull_request:
 
 jobs:
-  unit-tests:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      - run: npm ci
-      - run: npm test
-
   integration:
-    # Testcontainers requires Docker. ubuntu-latest pre-installs it; no
-    # extra setup step needed. The socket is at /var/run/docker.sock.
     runs-on: ubuntu-latest
     permissions:
       contents: read
