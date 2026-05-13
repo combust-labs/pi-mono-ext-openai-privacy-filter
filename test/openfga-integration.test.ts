@@ -29,6 +29,7 @@ import assert from 'node:assert';
 import { createHash } from 'crypto';
 import { createRequire } from 'node:module';
 import { lookup } from 'node:dns';
+import { ulid } from 'ulidx';
 import { after, before, describe, it } from 'node:test';
 import { GenericContainer, StartedTestContainer, type, Wait } from 'testcontainers';
 
@@ -342,24 +343,44 @@ before(async function () {
   // Verify the connection and ensure the authorization model exists in the
   // harness store. If the model is absent (model_id not in store), create it.
   if (!useTestcontainers) {
-    OPENFGA_API_URL = process.env.OPENFGA_API_URL!;
-    process.env.OPENFGA_STORE_ID = process.env.OPENFGA_STORE_ID!;
-    console.log(`[SETUP] Using harness OpenFGA at ${OPENFGA_API_URL}`);
+    // OPENFGA_API_URL is set from env at module scope; use it directly.
+    // If absent, fall back to the harness hostname (agent-openfga).
+    OPENFGA_API_URL = process.env.OPENFGA_API_URL || (await resolveOpenFGAUrl());
+    process.env.OPENFGA_API_URL = OPENFGA_API_URL;
     await api('/healthz');
     console.log('[SETUP] OpenFGA connection verified');
 
-    // Verify the model exists in the store; create it if absent.
-    const existingModelId = process.env.OPENFGA_MODEL_ID!;
-    try {
-      await api(`/stores/${process.env.OPENFGA_STORE_ID}/authorization-models/${existingModelId}`);
-      process.env.OPENFGA_MODEL_ID = existingModelId;
-      console.log(`[SETUP] store=${process.env.OPENFGA_STORE_ID} model=${existingModelId} (existing)\n`);
-    } catch {
-      // Model not found — create it in the harness store
-      console.log(`[SETUP] Model ${existingModelId} not found in store; creating...`);
+    // Store: use harness env var, or create one (OpenFGA returns a valid ULID).
+    if (!process.env.OPENFGA_STORE_ID) {
+      console.log('[SETUP] OPENFGA_STORE_ID not set — creating store...');
+      const newStoreId = (await api<{ id: string }>('/stores', {
+        method: 'POST',
+        body: JSON.stringify({ name: STORE_NAME }),
+      })).id;
+      process.env.OPENFGA_STORE_ID = newStoreId;
+      console.log(`[SETUP] store=${newStoreId} (created)`);
+    } else {
+      process.env.OPENFGA_STORE_ID = process.env.OPENFGA_STORE_ID;
+    }
+
+    // Model: use harness env var, or create one in the store.
+    if (!process.env.OPENFGA_MODEL_ID) {
+      console.log('[SETUP] OPENFGA_MODEL_ID not set — creating model...');
       const newModelId = await createModel(process.env.OPENFGA_STORE_ID!);
       process.env.OPENFGA_MODEL_ID = newModelId;
-      console.log(`[SETUP] store=${process.env.OPENFGA_STORE_ID} model=${newModelId} (created)\n`);
+      console.log(`[SETUP] model=${newModelId} (created)\n`);
+    } else {
+      const existingModelId = process.env.OPENFGA_MODEL_ID;
+      try {
+        await api(`/stores/${process.env.OPENFGA_STORE_ID}/authorization-models/${existingModelId}`);
+        process.env.OPENFGA_MODEL_ID = existingModelId;
+        console.log(`[SETUP] store=${process.env.OPENFGA_STORE_ID} model=${existingModelId} (existing)\n`);
+      } catch {
+        console.log(`[SETUP] Model ${existingModelId} not found; creating...`);
+        const newModelId = await createModel(process.env.OPENFGA_STORE_ID!);
+        process.env.OPENFGA_MODEL_ID = newModelId;
+        console.log(`[SETUP] model=${newModelId} (created)\n`);
+      }
     }
     return;
   }
