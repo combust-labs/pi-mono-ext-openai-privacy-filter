@@ -294,17 +294,19 @@ Docker must be running. testcontainers pulls the `openfga/openfga:latest` image 
 ## 10. Implementation Checklist
 
 ### Phase A: Install testcontainers
-- [ ] `npm install testcontainers --save-dev`
+- [x] `npm install testcontainers --save-dev`
 
 ### Phase B: Rewrite `test/openfga-integration.test.ts`
-- [ ] Import `GenericContainer`, `Wait`, `StartedTestContainer` from `testcontainers`
-- [ ] Replace `getOpenFGAUrlSync()` / `resolveOpenFGAUrl()` with testcontainers container startup
-- [ ] Use `withExposedPorts({ container: 8080, host: undefined })` for random port
-- [ ] Set `process.env.OPENFGA_API_URL`, `OPENFGA_STORE_ID`, `OPENFGA_MODEL_ID` in `beforeAll`
-- [ ] Create store and authorization model in `beforeAll` (reuse existing logic)
-- [ ] Stop container in `afterAll`
-- [ ] Keep `runIntegrationTests` guard and `describe({ skip: !runIntegrationTests }, ...)`
-- [ ] Verify tests pass with `OPENFGA_INTEGRATION_TEST=true npm test` on host
+- [x] Import `GenericContainer`, `Wait`, `StartedTestContainer` from `testcontainers`
+- [x] Keep `getOpenFGAUrlSync()` / `resolveOpenFGAUrl()` for harness container path
+- [x] Add `USE_TESTCONTAINERS` env var detection to trigger testcontainers path
+- [x] Use `withExposedPorts({ container: 8080, host: undefined })` for random port
+- [x] Use `Wait.forLogMessage('starting HTTP server')` for container readiness
+- [x] Set `process.env.OPENFGA_API_URL`, `OPENFGA_STORE_ID`, `OPENFGA_MODEL_ID` in `beforeAll`
+- [x] Create store and authorization model in `beforeAll` (reuse existing logic)
+- [x] Stop container in `afterAll`; harness path calls `cleanupStores()`
+- [x] Keep `runIntegrationTests` guard and `describe({ skip: !runIntegrationTests }, ...)`
+- [ ] Verify tests pass with `OPENFGA_INTEGRATION_TEST=true npm test` on host (deferred — outside container)
 
 ### Phase C: GitHub CI
 - [ ] Add `integration` job to `.github/workflows/ci.yml`
@@ -313,6 +315,5 @@ Docker must be running. testcontainers pulls the `openfga/openfga:latest` image 
 - [ ] Verify CI passes
 
 ### Phase D: Cleanup
-- [ ] Remove `test/support/fetch-mock.ts` (superseded — already done in prior phase)
-- [ ] Update `docs/proposal-upstream-openfga-sdk.md` Phase 7 items to reflect testcontainers usage (already marked complete in that proposal)
+- [ ] Remove `test/support/fetch-mock.ts` (not present — superseded by prior nock migration)
 - [ ] Confirm all 200 unit tests still pass without `OPENFGA_INTEGRATION_TEST`
