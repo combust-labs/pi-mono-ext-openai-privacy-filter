@@ -437,22 +437,18 @@ Unit tests use [nock](https://github.com/nock/nock) to mock HTTP responses — n
 npm test
 ```
 
-`OPENFGA_API_URL` must be set (provided by the harness in the container). On the host or in CI without a harness, use `OPENFGA_INTEGRATION_TEST=true npm test` — testcontainers provides the URL automatically. Without that flag, tests throw `OPENFGA_API_URL env var is required for tests` at load time.
+`npm test` requires `OPENFGA_API_URL` to be set manually (e.g. `OPENFGA_API_URL=http://localhost:28080 npm test`). Tests throw at load time if the env var is absent.
 
 ### Integration Tests
 
-Real OpenFGA integration tests verify the full authorization flow. They are **opt-in** and disabled by default:
-
-```bash
-OPENFGA_INTEGRATION_TEST=true npm test
-```
+`OPENFGA_INTEGRATION_TEST=true npm test` — runs all 207 tests (unit + integration) with no manual configuration needed. Testcontainers auto-detects Docker and spins up a temporary OpenFGA container on a random port. The harness path uses `OPENFGA_API_URL` from the environment automatically.
 
 Two environments are supported:
 
 | Environment | How |
 |---|---|
 | Inside the harness container | Uses `agent-openfga` Docker DNS name. `OPENFGA_API_URL` is provided by the harness. |
-| On the host / GitHub CI | Uses [testcontainers](https://node.testcontainers.org/) to spin up `openfga/openfga` on a random host port. Set `USE_TESTCONTAINERS=true` or omit `OPENFGA_API_URL`. |
+| On the host / GitHub CI | Uses [testcontainers](https://node.testcontainers.org/) to spin up `openfga/openfga` on a random host port. Docker is pre-installed on ubuntu-latest GitHub Actions runners. |
 
 In both cases the `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` env vars are set from the live server so the SDK wrapper picks them up automatically.
 
