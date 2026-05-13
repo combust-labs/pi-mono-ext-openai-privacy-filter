@@ -23,15 +23,14 @@
  * USE_TESTCONTAINERS=true OPENFGA_INTEGRATION_TEST=true npm test
  */
 
-import { describe, it, before, after } from 'node:test';
+import { createHash } from 'crypto';
+import nock from 'nock';
 import assert from 'node:assert';
 import { createHash } from 'crypto';
+import { createRequire } from 'node:module';
 import { lookup } from 'node:dns';
-import {
-  GenericContainer,
-  Wait,
-  type StartedTestContainer,
-} from 'testcontainers';
+import { after, before, describe, it } from 'node:test';
+import { GenericContainer, StartedTestContainer, type, Wait } from 'testcontainers';
 
 // ---------------------------------------------------------------------------
 // Environment detection
@@ -40,19 +39,53 @@ import {
 export const runIntegrationTests = process.env.OPENFGA_INTEGRATION_TEST === 'true';
 
 /**
- * True when the testcontainers path should be used, even if OPENFGA_API_URL
- * is already set. Set USE_TESTCONTAINERS=true to force testcontainers on
- * the host or in CI (bypasses the harness env var).
+ * Sync check for Docker availability. testcontainers uses the Docker socket
+ * at /var/run/docker.sock (Linux) or the named pipe on Windows. If Docker is
+ * not available, testcontainers cannot start containers.
+ */
+function isDockerAvailable(): boolean {
+  try {
+    // Use createRequire to get a working require() in ESM context.
+    const req = createRequire(import.meta.url);
+    const { existsSync } = req('node:fs');
+    // Check the default Linux socket and Windows named pipe
+    return existsSync('/var/run/docker.sock') || existsSync('//./pipe/docker_engine');
+  } catch {
+    return false;
+  }
+}
+
+const dockerAvailable = isDockerAvailable();
+
+/**
+ * True when the testcontainers path should be used.
+ *
+ * Decision order:
+ *  1. Docker must be available — otherwise testcontainers would throw
+ *  2. Either USE_TESTCONTAINERS=true is set, or OPENFGA_API_URL is absent
+ *     (meaning we have no harness address to fall back to)
+ *
+ * If Docker is unavailable and OPENFGA_API_URL is also not set but
+ * OPENFGA_INTEGRATION_TEST=true, we throw at module load time — the
+ * integration tests cannot run in this environment.
  */
 const useTestcontainers =
-  process.env.USE_TESTCONTAINERS === 'true' ||
-  // Auto-detect: if OPENFGA_API_URL is absent, we need testcontainers
-  (!process.env.OPENFGA_API_URL && runIntegrationTests);
+  dockerAvailable &&
+  (process.env.USE_TESTCONTAINERS === 'true' || !process.env.OPENFGA_API_URL);
 
 if (!runIntegrationTests) {
   console.log('[INFO] Skipping OpenFGA integration tests (set OPENFGA_INTEGRATION_TEST=true to run)');
 } else if (useTestcontainers) {
-  console.log('[INFO] Using testcontainers for OpenFGA (USE_TESTCONTAINERS=true or no OPENFGA_API_URL)');
+  console.log('[INFO] Using testcontainers for OpenFGA (Docker available, no OPENFGA_API_URL)');
+} else if (!dockerAvailable && !process.env.OPENFGA_API_URL) {
+  // Both paths failed: no Docker for testcontainers, no harness env var.
+  // Fail immediately so the test run is clearly broken.
+  throw new Error(
+    'OPENFGA_INTEGRATION_TEST=true but Docker is not available and OPENFGA_API_URL is not set. ' +
+    'Either: (1) start Docker and set USE_TESTCONTAINERS=true, or (2) run inside the harness container.',
+  );
+} else {
+  console.log('[INFO] Using harness OpenFGA (OPENFGA_API_URL is set)');
 }
 
 // ---------------------------------------------------------------------------
@@ -117,10 +150,14 @@ async function api<T = unknown>(
         ...opts,
         headers: { 'Content-Type': 'application/json', ...opts.headers },
       });
+      // Read body as text first so it is fully consumed. Subsequent fetch
+      // calls (retries) use a fresh Request — never re-enter fetch with the
+      // same body stream that was already consumed by the interceptors.
+      const bodyText = await r.text();
       if (!r.ok) {
-        throw new Error(`OpenFGA ${path} (${r.status}): ${await r.text()}`);
+        throw new Error(`OpenFGA ${path} (${r.status}): ${bodyText}`);
       }
-      return r.json() as Promise<T>;
+      return JSON.parse(bodyText) as T;
     } catch (e) {
       lastError = e as Error;
       if (i < retries - 1) {
@@ -288,40 +325,42 @@ let tcContainer: StartedTestContainer | null = null;
 // ---------------------------------------------------------------------------
 
 before(async function () {
-  // Give tests a long timeout — testcontainers may need to pull the image
-  // on first run, which can take 30-60 seconds.
-  if (runIntegrationTests) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this as any).timeout(120_000);
-  }
+  // Give tests a generous timeout — testcontainers may need to pull the image
+  // on first run (30-60s). The harness path runs in milliseconds.
+  // NOTE: this.timeout() is not available in before() hook context in Node 24.
+  // The timeout is set via describe() instead.
 
   if (!runIntegrationTests) return;
 
-  // ── Path 1: Harness container (OPENFGA_API_URL already set via env) ──────
-  if (!useTestcontainers) {
-    let resolved = false;
-    for (let i = 0; i < 3 && !resolved; i++) {
-      try {
-        OPENFGA_API_URL = await resolveOpenFGAUrl();
-        // Set process.env so api() helper uses it
-        process.env.OPENFGA_API_URL = OPENFGA_API_URL;
-        console.log(`[SETUP] Using OpenFGA at ${OPENFGA_API_URL}`);
-        await api('/healthz');
-        resolved = true;
-        console.log('[SETUP] OpenFGA connection verified');
-      } catch (e) {
-        console.log(`[SETUP] Connection attempt ${i + 1}/3 failed: ${(e as Error).message}`);
-        if (i < 2) await new Promise(r => setTimeout(r, 2000));
-      }
-    }
-    if (!resolved) throw new Error('Failed to connect to OpenFGA after 3 attempts');
+  // Unit tests leave nock interceptors active and disableNetConnect() may be
+  // stuck in "block" mode. nock.restore() completely removes nock's patch on
+  // globalThis.fetch, allowing real HTTP calls to pass through unhindered.
+  nock.restore();
 
-    console.log('\n[SETUP] Creating store and model...');
-    const storeId = (await createStore(STORE_NAME)).id;
-    const modelId = (await createModel(storeId)).id;
-    process.env.OPENFGA_STORE_ID = storeId;
-    process.env.OPENFGA_MODEL_ID = modelId;
-    console.log(`[SETUP] store=${storeId}, model=${modelId}\n`);
+  // ── Path 1: Harness container — env vars already set by the harness ────
+  // The harness sets OPENFGA_API_URL, OPENFGA_STORE_ID, OPENFGA_MODEL_ID.
+  // Verify the connection and ensure the authorization model exists in the
+  // harness store. If the model is absent (model_id not in store), create it.
+  if (!useTestcontainers) {
+    OPENFGA_API_URL = process.env.OPENFGA_API_URL!;
+    process.env.OPENFGA_STORE_ID = process.env.OPENFGA_STORE_ID!;
+    console.log(`[SETUP] Using harness OpenFGA at ${OPENFGA_API_URL}`);
+    await api('/healthz');
+    console.log('[SETUP] OpenFGA connection verified');
+
+    // Verify the model exists in the store; create it if absent.
+    const existingModelId = process.env.OPENFGA_MODEL_ID!;
+    try {
+      await api(`/stores/${process.env.OPENFGA_STORE_ID}/authorization-models/${existingModelId}`);
+      process.env.OPENFGA_MODEL_ID = existingModelId;
+      console.log(`[SETUP] store=${process.env.OPENFGA_STORE_ID} model=${existingModelId} (existing)\n`);
+    } catch {
+      // Model not found — create it in the harness store
+      console.log(`[SETUP] Model ${existingModelId} not found in store; creating...`);
+      const newModelId = await createModel(process.env.OPENFGA_STORE_ID!);
+      process.env.OPENFGA_MODEL_ID = newModelId;
+      console.log(`[SETUP] store=${process.env.OPENFGA_STORE_ID} model=${newModelId} (created)\n`);
+    }
     return;
   }
 
@@ -362,6 +401,11 @@ before(async function () {
 });
 
 after(async () => {
+  // Only run cleanup when integration tests were actually active.
+  // The after() hook fires even when the describe is skipped, but before()
+  // may not have called nock.restore() in that case.
+  if (!runIntegrationTests) return;
+
   console.log('\n[CLEANUP]');
   if (tcContainer) {
     await tcContainer.stop();
@@ -370,6 +414,10 @@ after(async () => {
   } else {
     await cleanupStores();
   }
+
+  // Re-activate nock so any subsequent test files still have HTTP mocking.
+  nock.activate();
+
   console.log('[CLEANUP] done\n');
 });
 
@@ -377,7 +425,7 @@ after(async () => {
 // Integration tests
 // ---------------------------------------------------------------------------
 
-describe('OpenFGA Integration', { skip: !runIntegrationTests }, () => {
+describe('OpenFGA Integration', { skip: !runIntegrationTests, timeout: 120_000 }, () => {
   const emailHash = createHash('sha256').update('test@test.com').digest('hex').substring(0, 40);
   const piiInstanceId = `pii_instance:sha256-${emailHash}`;
 
