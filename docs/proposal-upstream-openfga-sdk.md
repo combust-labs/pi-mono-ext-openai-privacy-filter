@@ -533,7 +533,8 @@ The following checklist provides a sequential task list for implementing this pr
 - [x] 5.8. Use `.persist()` or `.times(N)` on interceptors for SDK retry scenarios (429/5xx)
 - [x] 5.9. Use `scope.done()` to assert the HTTP call was made
 - [x] 5.10. For unit tests that don't need HTTP at all: use `sinon.stub(sdk, 'check')` instead of nock (deferred — sinon not installed)
-- [x] 5.11. Verify all rewritten tests pass (`npm test`) — 193/200 pass; 7 error-response tests timeout against real server
+- [x] 5.11. Verify all rewritten tests pass (`npm test`) — all 200 pass
+- [x] 5.12. `TEST_API_URL` in each test file must be derived from `OPENFGA_API_URL` env var with **no silent fallback** — throw at load time if the env var is absent. This prevents the harness from silently using a wrong IP while tests produce false confidence.
 
 **All 200 tests pass** with `npm test` after adding `--import=nock` to the test runner and using `() => true` body matchers on nock interceptors for error responses (SDK axios sends body fields that nock's default body matcher rejects).
 
@@ -544,7 +545,7 @@ The following checklist provides a sequential task list for implementing this pr
 - [x] 6.3. Update error handling where `Error` → `FgaError` migration matters (wrapped in abstraction layer)
 - [x] 6.4. Verify `checkShare()` calls still return correct `ShareCheckResult` shape
 - [x] 6.5. Verify `batchCheckShare()` calls still return correct `Map<string, ShareCheckResult>` shape
-- [x] 6.6. Run full test suite end-to-end — 193/200 tests pass
+- [x] 6.6. Run full test suite end-to-end — all 200 tests pass
 
 ### Phase 7 — End-to-End Validation
 
