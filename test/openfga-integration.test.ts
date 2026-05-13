@@ -40,6 +40,39 @@ import { ulid } from 'ulidx';
  */
 const FALLBACK_STORE_ID = ulid();
 const FALLBACK_MODEL_ID = ulid();
+
+// ---------------------------------------------------------------------------
+// OpenFGA Docker image (testcontainers)
+// ---------------------------------------------------------------------------
+
+/** Default image pulled when testcontainers path is used.
+ *  Override with OPENFGA_CONTAINER_IMAGE env var (e.g. openfga/openfga:v1.14.0).
+ *  The tag is fetched at module load time from GitHub Releases to stay current.
+ *  If the fetch fails, 'latest' is used as a sensible fallback.
+ */
+async function getDefaultOpenFGAImage(): Promise<string> {
+  try {
+    const res = await fetch('https://api.github.com/repos/openfga/openfga/releases/latest', {
+      headers: { 'User-Agent': 'privacy-filter-tests' },
+    });
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    const json = (await res.json()) as { tag_name: string };
+    return `docker.io/openfga/openfga:${json.tag_name}`;
+  } catch {
+    return 'docker.io/openfga/openfga:latest';
+  }
+}
+
+// Resolve once at module load time — top-level await works in ESM test files.
+const DEFAULT_OPENFGA_IMAGE = await getDefaultOpenFGAImage();
+
+/** The image used for the testcontainers container.
+ *  Set OPENFGA_CONTAINER_IMAGE env var to override the default (e.g. to pin a
+ *  specific version for offline/CI environments).
+ */
+const OPENFGA_IMAGE =
+  process.env.OPENFGA_CONTAINER_IMAGE || DEFAULT_OPENFGA_IMAGE;
+
 // ---------------------------------------------------------------------------
 // Environment detection
 // ---------------------------------------------------------------------------
@@ -398,7 +431,7 @@ before(async function () {
 
   // Start container with a random host port mapped to container port 8080.
   // The OS picks an available port automatically — no conflicts.
-  tcContainer = await new GenericContainer('openfga/openfga:latest')
+  tcContainer = await new GenericContainer(OPENFGA_IMAGE)
     .withExposedPorts({ container: 8080, host: undefined })
     .withCommand(['run'])
     .withStartupTimeout(60_000)
