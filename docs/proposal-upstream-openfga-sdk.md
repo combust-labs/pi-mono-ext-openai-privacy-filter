@@ -21,6 +21,7 @@ This proposal is authored in the context of existing work documented in `docs/`.
 | **`openfga-model-tutorial.md`** | **Complements** | A tutorial on the OpenFGA authorization model. This proposal does not change the model; it changes only the HTTP transport. No changes needed to the tutorial. |
 | **`proposal-extension-integration-tests.md`** | **Loose complement** | Deals with extension integration tests at a higher level (tool registration, TUI rendering). Less directly connected to the OpenFGA HTTP transport, but the test infrastructure approach described here (mocking network calls) is consistent with what that proposal would need for any OpenFGA-related test scenarios. |
 | **`pii-check-directions-analysis.md`** | **No direct relationship** | Analyzes PII check directions (input/output) in the extension lifecycle. Unrelated to the OpenFGA client implementation. |
+| **`proposal-openfga-testcontainers.md`** | **Superseded by** | Replaces the `agent-openfga` hostname approach in `openfga-integration.test.ts` with testcontainers, enabling integration tests to run on the host and in GitHub CI. The testcontainers approach is the implementation path for Phase 7 deferred tasks (OTEL, retries). |
 
 **What this proposal does not change:**
 - The authorization model (tuples, types, relations)
