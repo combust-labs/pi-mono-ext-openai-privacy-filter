@@ -30,6 +30,15 @@ import { createHash } from 'crypto';
 import { createRequire } from 'node:module';
 import { lookup } from 'node:dns';
 import { ulid } from 'ulidx';
+
+/** Fallback ULID used when the harness does not provide the store/model IDs.
+ *  OpenFGA requires valid ULIDs (26 uppercase base32 chars) for store and model IDs.
+ *  We generate one upfront so createModel always receives a non-undefined storeId.
+ *  The actual store is still created via the API (OpenFGA assigns its own ID).
+ *  The fallback is only used if the API call to create the store fails.
+ */
+const FALLBACK_STORE_ID = ulid();
+const FALLBACK_MODEL_ID = ulid();
 import { after, before, describe, it } from 'node:test';
 import { GenericContainer, StartedTestContainer, type, Wait } from 'testcontainers';
 
@@ -182,8 +191,9 @@ async function createStore(name: string): Promise<string> {
 }
 
 async function createModel(storeId: string): Promise<string> {
+  const sid = storeId ?? FALLBACK_STORE_ID;
   return (await api<{ authorization_model_id: string }>(
-    `/stores/${storeId}/authorization-models`,
+    `/stores/${sid}/authorization-models`,
     {
       method: 'POST',
       body: JSON.stringify({
@@ -359,25 +369,25 @@ before(async function () {
       })).id;
       process.env.OPENFGA_STORE_ID = newStoreId;
       console.log(`[SETUP] store=${newStoreId} (created)`);
-    } else {
-      process.env.OPENFGA_STORE_ID = process.env.OPENFGA_STORE_ID;
     }
+
+    const storeId = process.env.OPENFGA_STORE_ID ?? FALLBACK_STORE_ID;
 
     // Model: use harness env var, or create one in the store.
     if (!process.env.OPENFGA_MODEL_ID) {
       console.log('[SETUP] OPENFGA_MODEL_ID not set — creating model...');
-      const newModelId = await createModel(process.env.OPENFGA_STORE_ID!);
+      const newModelId = await createModel(storeId);
       process.env.OPENFGA_MODEL_ID = newModelId;
       console.log(`[SETUP] model=${newModelId} (created)\n`);
     } else {
       const existingModelId = process.env.OPENFGA_MODEL_ID;
       try {
-        await api(`/stores/${process.env.OPENFGA_STORE_ID}/authorization-models/${existingModelId}`);
+        await api(`/stores/${storeId}/authorization-models/${existingModelId}`);
         process.env.OPENFGA_MODEL_ID = existingModelId;
-        console.log(`[SETUP] store=${process.env.OPENFGA_STORE_ID} model=${existingModelId} (existing)\n`);
+        console.log(`[SETUP] store=${storeId} model=${existingModelId} (existing)\n`);
       } catch {
         console.log(`[SETUP] Model ${existingModelId} not found; creating...`);
-        const newModelId = await createModel(process.env.OPENFGA_STORE_ID!);
+        const newModelId = await createModel(storeId);
         process.env.OPENFGA_MODEL_ID = newModelId;
         console.log(`[SETUP] model=${newModelId} (created)\n`);
       }
@@ -415,7 +425,7 @@ before(async function () {
   // Create store and model
   console.log('[SETUP] Creating store and model...');
   const storeId = (await createStore(STORE_NAME)).id;
-  const modelId = (await createModel(storeId)).id;
+  const modelId = (await createModel(storeId ?? FALLBACK_STORE_ID)).id;
   process.env.OPENFGA_STORE_ID = storeId;
   process.env.OPENFGA_MODEL_ID = modelId;
   console.log(`[SETUP] store=${storeId}, model=${modelId}\n`);
