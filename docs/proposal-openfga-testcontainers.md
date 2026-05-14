@@ -309,11 +309,11 @@ Docker must be running. testcontainers pulls the `openfga/openfga:latest` image 
 - [ ] Verify tests pass with `OPENFGA_INTEGRATION_TEST=true npm test` on host (deferred — outside container)
 
 ### Phase C: GitHub CI
-- [ ] Add `integration` job to `.github/workflows/ci.yml`
-- [ ] Pre-pull `openfga/openfga:latest` image
-- [ ] Run with `OPENFGA_INTEGRATION_TEST=true`
-- [ ] Verify CI passes
+- [x] Add `integration` job to `.github/workflows/ci.yml`
+- [x] Pre-pull `openfga/openfga:latest` image
+- [x] Run with `OPENFGA_INTEGRATION_TEST=true`
+- [x] Verify CI passes
 
 ### Phase D: Cleanup
 - [ ] Remove `test/support/fetch-mock.ts` (not present — superseded by prior nock migration)
-- [ ] Confirm all 200 unit tests still pass without `OPENFGA_INTEGRATION_TEST`
+- [x] Confirm all 200 unit tests still pass without `OPENFGA_INTEGRATION_TEST`
