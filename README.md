@@ -437,8 +437,6 @@ Unit tests use [nock](https://github.com/nock/nock) to mock HTTP responses — n
 npm test
 ```
 
-`npm test` requires `OPENFGA_API_URL` to be set manually (e.g. `OPENFGA_API_URL=http://localhost:28080 npm test`). Tests throw at load time if the env var is absent.
-
 ### Integration Tests
 
 `OPENFGA_INTEGRATION_TEST=true npm test` — runs all 207 tests (unit + integration) with no manual configuration needed. Testcontainers auto-detects Docker and spins up a temporary OpenFGA container on a random port. The harness path uses `OPENFGA_API_URL` from the environment automatically.
