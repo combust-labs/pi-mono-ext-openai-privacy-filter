@@ -14,6 +14,10 @@
 import { pathToFileURL } from 'node:url';
 import { Module } from 'node:module';
 
+// Preload nock to ensure it intercepts Node's http module before any test code runs.
+// This must come before any other imports to guarantee HTTP interception in ESM.
+import 'nock';
+
 // Derive paths from the current working directory rather than a hardcoded /code/
 const cwd = process.cwd();
 const mockPipelineUrl = pathToFileURL(cwd + '/test/support/mock-pipeline.ts').href;

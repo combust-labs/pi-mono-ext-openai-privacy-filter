@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { env, pipeline } from '@huggingface/transformers';
 import { Box, Text } from '@mariozechner/pi-tui';
 
-import { getOpenFGAClient } from './openfga.ts';
+import { getOpenFGAClient } from './src/openfga-sdk-wrapper.ts';
 import { buildDeniedCategoriesSet, buildSharingDeniedCategoriesSet, isSharingEnabled, getRecipientId, type AggregatedAnnotation } from './privacy-auth.ts';
 import { logHealthCheckFailed, logAuthError } from './privacy-logger.ts';
 import { recordPiiDetected, recordFailClosed, startMetrics } from './privacy-metrics.ts';

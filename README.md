@@ -16,6 +16,17 @@ All PII detection capabilities are derived directly from the [OpenAI Privacy Fil
 - On-demand scanning via chat command
 - **Authorization-based sharing control** (output direction) with lineage tracking
 
+### Architecture
+
+OpenFGA communication is handled by the upstream [@openfga/sdk](https://github.com/openfga/js-sdk) with a privacy-preserving wrapper (`src/openfga-sdk-wrapper.ts`) that:
+
+- **Never sends raw PII literals to OpenFGA** — values are SHA256-hashed before use
+- Applies project ID conventions (`model_instance:`, `pii_instance:`, `recipient:`, `category:`)
+- Composes `checkShare()` with a 4-step authorization sequence
+- Maps SDK errors to the project's custom error message format
+
+The `openfga.ts` file at the project root is a re-export facade — all application code imports from it. Tests inject mocks via `setOpenFGAClient()`.
+
 ## Features
 
 - **8 PII categories** (from the Privacy Filter model): names, emails, phone numbers, addresses, URLs, dates, account numbers, secrets
@@ -88,10 +99,11 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 |---------------------|---------|-------------|
 | `PRIVACY_FILTER_MODEL_PATH` | `~/.cache/huggingface/hub/` | Base local path for model lookup |
 | `PRIVACY_FILTER_WEBGPU` | `false` | Enable WebGPU acceleration (`true`/`false`) |
-| `OPENFGA_API_URL` | `http://localhost:28080` | OpenFGA REST API URL |
-| `OPENFGA_STORE_ID` | `privacy-policies` | OpenFGA store ID |
-| `OPENFGA_MODEL_ID` | `privacy-model` | OpenFGA authorization model ID |
+| `OPENFGA_API_URL` | _(required)_ | OpenFGA REST API URL. In the harness: `http://agent-openfga:8080`. On host/CI: use testcontainers (auto-detected) or set explicitly. |
+| `OPENFGA_STORE_ID` | _(required)_ | OpenFGA store ID (ULID). Created automatically if not provided. |
+| `OPENFGA_MODEL_ID` | _(required)_ | OpenFGA authorization model ID (ULID). Created automatically if not provided. |
 | `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
+| `OPENFGA_CONTAINER_IMAGE` | `docker.io/openfga/openfga:<latest-release>` | Docker image for testcontainers (integration tests only). Override to pin a specific version. |
 | `PRIVACY_FILTER_RECIPIENT_ID` | _(empty)_ | Recipient ID for sharing checks (e.g., `user:alice`) |
 | `PRIVACY_FILTER_SHARING_ENABLED` | `false` | Enable sharing authorization checks (`true`/`false`) |
 | `METRICS_ENABLED` | _(empty)_ | Enable OTLP/Prometheus metrics push (`true`) — requires an endpoint to be set |
@@ -385,14 +397,14 @@ If OpenFGA is unreachable or returns an error, the extension **fail-closes** —
 Error: OpenFGA check failed: fetch failed: Connection refused
 ```
 - Ensure OpenFGA is running: `docker ps | grep openfga`
-- Check the API URL matches: `OPENFGA_API_URL=http://localhost:28080`
+- Check that `OPENFGA_API_URL` is set correctly
 
 **Store not found (404)**
 ```
 Error: OpenFGA check failed (404):
 ```
 - Run `./scripts/openfga-init.sh` to create the store and model
-- Verify `OPENFGA_STORE_ID` is set correctly
+- Verify `OPENFGA_STORE_ID` is set correctly and is a valid ULID
 
 **All PII is being masked despite authorization**
 - Use `/check-pii-access <model-id> <category>` from the chat to verify directly
@@ -409,6 +421,34 @@ Error: OpenFGA check failed (404):
 **OpenFGA returns error on write**
 - If using authentication, ensure `OPENFGA_API_TOKEN` is set
 - Check store ID and model ID are correct
+
+**Tests fail with `OPENFGA_API_URL env var is required for tests`**
+- Unit tests require `OPENFGA_API_URL` to be set at load time — they throw if absent
+- The test harness provides it automatically at `http://agent-openfga:8080`
+- On the host or in CI: run integration tests separately with `OPENFGA_INTEGRATION_TEST=true npm test` — testcontainers handles the URL automatically
+
+## Testing
+
+### Unit Tests
+
+Unit tests use [nock](https://github.com/nock/nock) to mock HTTP responses — no real OpenFGA server is needed. They are run with:
+
+```bash
+npm test
+```
+
+### Integration Tests
+
+`OPENFGA_INTEGRATION_TEST=true npm test` — runs all 207 tests (unit + integration) with no manual configuration needed. Testcontainers auto-detects Docker and spins up a temporary OpenFGA container on a random port. The harness path uses `OPENFGA_API_URL` from the environment automatically.
+
+Two environments are supported:
+
+| Environment | How |
+|---|---|
+| Inside the harness container | Uses `agent-openfga` Docker DNS name. `OPENFGA_API_URL` is provided by the harness. |
+| On the host / GitHub CI | Uses [testcontainers](https://node.testcontainers.org/) to spin up `openfga/openfga` on a random host port. Docker is pre-installed on ubuntu-latest GitHub Actions runners. |
+
+In both cases the `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` env vars are set from the live server so the SDK wrapper picks them up automatically.
 
 ## License
 
