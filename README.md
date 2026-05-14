@@ -99,7 +99,7 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 |---------------------|---------|-------------|
 | `PRIVACY_FILTER_MODEL_PATH` | `~/.cache/huggingface/hub/` | Base local path for model lookup |
 | `PRIVACY_FILTER_WEBGPU` | `false` | Enable WebGPU acceleration (`true`/`false`) |
-| `OPENFGA_API_URL` | _(required)_ | OpenFGA REST API URL. In the harness: `http://172.19.0.4:8080`. On host/CI: use testcontainers (auto-detected) or set explicitly. |
+| `OPENFGA_API_URL` | _(required)_ | OpenFGA REST API URL. In the harness: `http://agent-openfga:8080`. On host/CI: use testcontainers (auto-detected) or set explicitly. |
 | `OPENFGA_STORE_ID` | _(required)_ | OpenFGA store ID (ULID). Created automatically if not provided. |
 | `OPENFGA_MODEL_ID` | _(required)_ | OpenFGA authorization model ID (ULID). Created automatically if not provided. |
 | `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
@@ -424,7 +424,7 @@ Error: OpenFGA check failed (404):
 
 **Tests fail with `OPENFGA_API_URL env var is required for tests`**
 - Unit tests require `OPENFGA_API_URL` to be set at load time — they throw if absent
-- The test harness provides it automatically at `http://172.19.0.4:8080`
+- The test harness provides it automatically at `http://agent-openfga:8080`
 - On the host or in CI: run integration tests separately with `OPENFGA_INTEGRATION_TEST=true npm test` — testcontainers handles the URL automatically
 
 ## Testing

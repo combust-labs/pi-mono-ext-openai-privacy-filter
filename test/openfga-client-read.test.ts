@@ -7,10 +7,11 @@
  * readTuples uses the SDK's read() method which sends POST /stores/{id}/read.
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
-import assert from 'node:assert';
 import nock from 'nock';
-import { OpenFGAClientWrapper, createSDKClient } from '../src/openfga-sdk-wrapper.ts';
+import assert from 'node:assert';
+import { afterEach, beforeEach, describe, it } from 'node:test';
+
+import { createSDKClient, OpenFGAClientWrapper } from '../src/openfga-sdk-wrapper.ts';
 
 // NOTE: TEST_API_URL must be set via OPENFGA_API_URL env var.
 // Fallback to harness address only when OPENFGA_INTEGRATION_TEST=true
@@ -22,9 +23,9 @@ const TEST_API_URL = (() => {
   // The integration test's beforeAll overrides process.env with the correct
   // testcontainers address. This fallback is only for loading.
   if (process.env.OPENFGA_INTEGRATION_TEST === 'true') {
-    return 'http://172.19.0.4:8080';
+    return 'http://agent-openfga:8080';
   }
-  throw new Error('OPENFGA_API_URL env var is required for tests');
+  return 'http://pii-filter.tests:8080';
 })();
 const TEST_STORE_ID = '01KQJZGZ068QK7JFY96GSNFFSW';
 const TEST_MODEL_ID = '01KQK0PXQE92V0KXJMHWRJRS4M';
