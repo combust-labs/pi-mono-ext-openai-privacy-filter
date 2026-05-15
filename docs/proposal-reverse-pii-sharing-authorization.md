@@ -1,9 +1,10 @@
 # Proposal: Reverse PII Sharing Authorization
 
-**Extension:** pi-mono-ext-privacy-filter  
-**Author:** mlx-community/MiniMax-M2.7-8bit  
-**Date:** 2026-05-04  
-**Status:** Draft
+> **Note:** This proposal was **implemented** and extended using the
+> [PII Check Directions Analysis](../docs/pii-check-directions-analysis.md) document
+> (which introduced the input/output direction model superseding this proposal's
+> forward/reverse framing). See `feature/official-openfga-sdk` for the full
+> implementation.
 
 ---
 
@@ -178,7 +179,7 @@ export async function buildSharingDeniedCategoriesSet(
 
 ### 4.4 Updated Scripts
 
-#### `openfga-init.sh` — Updated Authorization Model
+#### `openfga-init.sh` - Updated Authorization Model
 
 ```bash
 create_model() {
@@ -236,7 +237,7 @@ create_model() {
 }
 ```
 
-#### `openfga-tuple.sh` — New Commands
+#### `openfga-tuple.sh` - New Commands
 
 ```bash
 # Grant sharing permission
@@ -321,16 +322,16 @@ const canShareLiteral = await openfga.checkShare({
 
 ## 8. Open Questions
 
-1. **Should sharing be all-or-nothing per recipient, or per-category?**  
+1. **Should sharing be all-or-nothing per recipient, or per-category?**
    The per-category approach (`can_share_email`, `can_share_phone`) offers finer control but adds complexity. The all-or-nothing approach (`can_share`) is simpler but less granular.
 
-2. **Should the extension support wildcards for recipients?**  
+2. **Should the extension support wildcards for recipients?**
    e.g., `model_instance:x --can_share--> recipient:user:*` to allow sharing with all users. OpenFGA does not support wildcards in the standard way, so this would need to be modeled differently (e.g., a group or organization type).
 
-3. **Should there be a distinction between "sharing with user" and "sharing with agent/harness"?**  
+3. **Should there be a distinction between "sharing with user" and "sharing with agent/harness"?**
    The recipient type already supports this via prefixes, but the semantics of sharing with a human user vs. another AI agent may differ.
 
-4. **How should the extension handle batch sharing checks for performance?**  
+4. **How should the extension handle batch sharing checks for performance?**
    When multiple PII entities are detected in model output, many sharing checks may be needed. OpenFGA supports batch check endpoints that could be leveraged.
 
 ---

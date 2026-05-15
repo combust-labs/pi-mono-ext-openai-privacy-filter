@@ -63,18 +63,6 @@ describe('privacy-tracing', () => {
     });
   });
 
-  describe('isTracingEnabled', () => {
-    it('returns false when no OTEL env vars are set', () => {
-      // Clear any existing OTEL env vars
-      delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-      delete process.env.OTEL_SERVICE_NAME;
-      delete process.env.OTEL_ENABLED;
-
-      // When tracing is disabled, tracePiiCheck should just execute the function
-      // This is tested by verifying the function completes without error
-    });
-  });
-
   describe('tracePiiCheck', () => {
     it('executes function when no tracer is available', async () => {
       // Import the function - since OTEL is not configured, it should just run
