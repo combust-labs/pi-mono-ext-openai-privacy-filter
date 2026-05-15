@@ -103,12 +103,15 @@ See the [pi-mono-docker README](https://github.com/combust-labs/pi-mono-docker#p
 | `OPENFGA_STORE_ID` | _(required)_ | OpenFGA store ID (ULID). Created automatically if not provided. |
 | `OPENFGA_MODEL_ID` | _(required)_ | OpenFGA authorization model ID (ULID). Created automatically if not provided. |
 | `OPENFGA_API_TOKEN` | _(empty)_ | Bearer token for OpenFGA authentication |
-| `OPENFGA_CONTAINER_IMAGE` | `docker.io/openfga/openfga:<latest-release>` | Docker image for testcontainers (integration tests only). Override to pin a specific version. |
+| `OPENFGA_CONTAINER_IMAGE` | `docker.io/openfga/openfga:<latest-release>` | Docker image for testcontainers (integration tests only). Override to pin a specific version. The default tag is fetched from GitHub Releases at module load time. |
 | `PRIVACY_FILTER_RECIPIENT_ID` | _(empty)_ | Recipient ID for sharing checks (e.g., `user:alice`) |
 | `PRIVACY_FILTER_SHARING_ENABLED` | `false` | Enable sharing authorization checks (`true`/`false`) |
 | `METRICS_ENABLED` | _(empty)_ | Enable OTLP/Prometheus metrics push (`true`) — requires an endpoint to be set |
+| `OTEL_ENABLED` | `false` | Explicitly enable OpenTelemetry tracing. When `true`, forces tracing on even without an endpoint set. |
+| `OTEL_SERVICE_NAME` | `pi-privacy-filter` | OpenTelemetry service name for trace context. |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | _(empty)_ | OTLP HTTP endpoint for metrics (e.g. `http://collector:4318/v1/metrics`) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | Fallback OTLP endpoint if `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is not set |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | _(empty)_ | OTLP HTTP endpoint for traces (enables tracing when set). |
+| `USE_TESTCONTAINERS` | `false` | Force testcontainers mode in integration tests (`true`/`false`). Normally auto-detected based on Docker availability. |
 | `PUSHGATEWAY_URL` | _(empty)_ | Prometheus Pushgateway URL (e.g. `http://pushgateway:9091`) — auto-detected by `/metrics` path |
 | `METRICS_JOB` | `pii-extension` | Job name used when pushing to Pushgateway |
 | `METRICS_PUSH_INTERVAL_MS` | `30000` | Interval between metric pushes in milliseconds |
@@ -230,7 +233,7 @@ docker run \
 ./scripts/openfga-init.sh
 ```
 
-   This creates a store named `privacy-policies` and the authorization model (v2). Copy the exported environment variables:
+   This creates a store and the v2 authorization model (defined in `scripts/openfga-init.sh`). The script prints the store and model ULIDs at the end — copy them into your environment:
 ```bash
 source /tmp/openfga_env.sh
 ```
@@ -290,7 +293,7 @@ The v2 authorization model defines four types:
 | `can_share` | `model_instance` | `pii_instance` | Model is authorized to share this PII |
 | `lineage` | `pii_instance` | `model_instance` | This PII was created by/through this model |
 | `can_receive_from` | `recipient` | `model_instance` | Recipient trusts this model |
-| `defines` | `category` | `model_instance` | Category defines which models produce it |
+| `defines` | `category` | `model_instance` | Category defines which models produce it (used to track which models originate which PII categories) |
 
 ### Sharing Authorization Flow
 
@@ -302,6 +305,23 @@ For a model to successfully share PII to a recipient, all four checks must pass:
 3. pii --can_view--> recipient     (recipient is allowed to view this PII)
 4. recipient --can_receive_from--> model  (recipient trusts this model)
 ```
+
+### Event Handlers
+
+The extension applies authorization checks at two points in the pi-mono event pipeline:
+
+| Event | Direction | When it fires |
+|-------|-----------|---------------|
+| `message_end` | Output | After the model sends a text response — primary sharing authorization check |
+| `tool_result` | Output | After a tool executes — applies sharing checks to tool output that goes directly to users or other agents |
+
+For a full analysis of why both are needed, see `docs/pii-check-directions-analysis.md`.
+
+**`message_end`** is the primary output handler. It intercepts model text responses before delivery to the user and applies sharing authorization. If sharing is not allowed for a given PII entity, the entity is masked in the response.
+
+**`tool_result`** is a secondary handler for cases where tool output bypasses the conversation context — for example, a tool that writes directly to a file or sends a message to an external recipient. It applies the same 4-step sharing check as `message_end`.
+
+Both handlers respect `PRIVACY_FILTER_SHARING_ENABLED` (must be `true`) and `PRIVACY_FILTER_RECIPIENT_ID`.
 
 ### Tuple Examples
 
@@ -437,9 +457,24 @@ Unit tests use [nock](https://github.com/nock/nock) to mock HTTP responses — n
 npm test
 ```
 
+`npm test` requires `OPENFGA_API_URL` to be set manually (e.g. `OPENFGA_API_URL=http://localhost:28080 npm test`). Tests throw at load time if the env var is absent.
+
+Unit test files:
+
+| File | What it tests |
+|------|---------------|
+| `test/hash-literal.test.ts` | SHA256 literal hashing utility |
+| `test/build-denied-categories-set.test.ts` | `buildDeniedCategoriesSet()` — input authorization decision logic |
+| `test/sharing-authorization.test.ts` | Full 4-step `checkShare()` sequence |
+| `test/openfga-client-*.test.ts` | OpenFGA SDK wrapper methods (check, write, read, delete, share) |
+| `test/openfga-failure-cases.test.ts` | SDK error handling and fail-closed behaviour |
+| `test/privacy-tracing.test.ts` | OTEL tracing initialisation and `tracePiiCheck()` |
+| `test/privacy-logger.test.ts` | PII redaction in log output |
+| `test/index-integration.test.ts` | Full pipeline (PII detection + authorization) via the index.ts API |
+
 ### Integration Tests
 
-`OPENFGA_INTEGRATION_TEST=true npm test` — runs all 207 tests (unit + integration) with no manual configuration needed. Testcontainers auto-detects Docker and spins up a temporary OpenFGA container on a random port. The harness path uses `OPENFGA_API_URL` from the environment automatically.
+`OPENFGA_INTEGRATION_TEST=true npm test` — runs all tests (unit + integration) with no manual configuration needed. Testcontainers auto-detects Docker and spins up a temporary OpenFGA container on a random port. The harness path uses `OPENFGA_API_URL` from the environment automatically.
 
 Two environments are supported:
 
@@ -448,7 +483,7 @@ Two environments are supported:
 | Inside the harness container | Uses `agent-openfga` Docker DNS name. `OPENFGA_API_URL` is provided by the harness. |
 | On the host / GitHub CI | Uses [testcontainers](https://node.testcontainers.org/) to spin up `openfga/openfga` on a random host port. Docker is pre-installed on ubuntu-latest GitHub Actions runners. |
 
-In both cases the `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` env vars are set from the live server so the SDK wrapper picks them up automatically.
+`test/openfga-integration.test.ts` — creates a live store and model, runs end-to-end authorization checks against a real OpenFGA server.
 
 ## License
 
