@@ -7,7 +7,7 @@
  *
  * Two environments are supported:
  *
- *  1. Inside the harness container — uses the `agent-openfga` Docker
+ *  1. Inside the harness container — uses the `agent-openfga` Docker hostname
  *     DNS name. The harness sets OPENFGA_API_URL before tests run, so
  *     the env var is picked up directly. No container management needed.
  *
@@ -40,6 +40,9 @@ import { ulid } from 'ulidx';
  */
 const FALLBACK_STORE_ID = ulid();
 const FALLBACK_MODEL_ID = ulid();
+
+/** Docker-internal DNS name for the harness OpenFGA service. */
+const AGENT_OPENFGA_HOSTNAME = 'agent-openfga';
 
 // ---------------------------------------------------------------------------
 // OpenFGA Docker image (testcontainers)
@@ -130,28 +133,27 @@ if (!runIntegrationTests) {
 }
 
 // ---------------------------------------------------------------------------
-// Harness path (agent-openfga inside Docker)
+// Harness path (AGENT_OPENFGA_HOSTNAME inside Docker)
 // ---------------------------------------------------------------------------
 
 /** Synchronous URL construction — used at module load time before async is available */
 function getOpenFGAUrlSync(): string {
   const envUrl = process.env.OPENFGA_API_URL;
   if (envUrl) return envUrl;
-  // Fallback: agent-openfga is the Docker-internal DNS name for the OpenFGA
-  // server. This only works inside the harness container network.
-  return 'http://agent-openfga:8080';
+  // Fallback: AGENT_OPENFGA_HOSTNAME is the Docker-internal DNS name for
+  // the OpenFGA server. This only works inside the harness container network.
+  return `http://${AGENT_OPENFGA_HOSTNAME}:8080`;
 }
 
-/** Async resolver — resolves agent-openfga hostname to IP via Node.js DNS */
+/** Async resolver — resolves AGENT_OPENFGA_HOSTNAME to IP via Node.js DNS */
 async function resolveOpenFGAUrl(): Promise<string> {
   const envUrl = process.env.OPENFGA_API_URL;
   if (envUrl) return envUrl;
 
-  const hostname = 'agent-openfga';
   try {
     const addresses = await new Promise<import('node:dns').LookupAddress[]>(
       (resolve, reject) => {
-        lookup(hostname, { all: true }, (err, addr) =>
+        lookup(AGENT_OPENFGA_HOSTNAME, { all: true }, (err, addr) =>
           err ? reject(err) : resolve(addr),
         );
       },
@@ -161,7 +163,7 @@ async function resolveOpenFGAUrl(): Promise<string> {
     }
   } catch { /* fall through to fallback */ }
 
-  return 'http://agent-openfga:8080';
+  return `http://${AGENT_OPENFGA_HOSTNAME}:8080`;
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +387,7 @@ before(async function () {
   // harness store. If the model is absent (model_id not in store), create it.
   if (!useTestcontainers) {
     // OPENFGA_API_URL is set from env at module scope; use it directly.
-    // If absent, fall back to the harness hostname (agent-openfga).
+    // If absent, fall back to the harness hostname (AGENT_OPENFGA_HOSTNAME).
     OPENFGA_API_URL = process.env.OPENFGA_API_URL || (await resolveOpenFGAUrl());
     process.env.OPENFGA_API_URL = OPENFGA_API_URL;
     await api('/healthz');
