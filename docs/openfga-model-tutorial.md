@@ -1,15 +1,18 @@
 # OpenFGA Authorization Model Tutorial
 
-This document provides a comprehensive tutorial on the OpenFGA authorization model used by the Privacy Filter extension, covering both **input direction** (viewing) and **output direction** (sharing) use cases.
+This document explains how the Privacy Filter extension uses OpenFGA to control PII access in two directions — **input** (model viewing PII in user prompts) and **output** (model sharing PII in its responses). It covers the authorization model, how to set up tuples, and how the extension's event handlers apply checks at runtime.
 
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Authorization Model Types](#authorization-model-types)
-3. [Input Direction: Viewing PII](#input-direction-viewing-pii)
-4. [Output Direction: Sharing PII](#output-direction-sharing-pii)
-5. [Key OpenFGA Insights](#key-openfga-insights)
-6. [Tuple Direction Cheat Sheet](#tuple-direction-cheat-sheet)
+2. [Finding Your Model ID](#finding-your-model-id)
+3. [Authorization Model Types](#authorization-model-types)
+4. [Input Direction: Viewing PII](#input-direction-viewing-pii)
+5. [Output Direction: Sharing PII](#output-direction-sharing-pii)
+6. [The `category` Relation](#the-category-relation)
+7. [Event Handlers and Message Flow](#event-handlers-and-message-flow)
+8. [Key OpenFGA Insights](#key-openfga-insights)
+9. [Tuple Direction Cheat Sheet](#tuple-direction-cheat-sheet)
 
 ---
 
@@ -21,6 +24,75 @@ The Privacy Filter extension uses OpenFGA to authorization control two direction
 2. **Output Direction**: Can a model **share** (output) specific PII to specific recipients?
 
 The authorization model is defined in `scripts/openfga-init.sh` and uses OpenFGA schema version 1.1.
+
+---
+
+## Finding Your Model ID
+
+Every tuple that controls what a model can do uses the model's **canonical model ID** as the `model_instance` subject. This ID comes from the pi-agent harness at runtime via `ctx.model?.id` — it is not configured via an environment variable.
+
+**To find your model ID:**
+
+Use the `/check-pii-access` command from the chat. The model ID is printed in error messages when OpenFGA returns a not-found result for the model:
+
+```
+/check-pii-access mlx-community/MiniMax-M2.7-8bit private_email
+```
+
+If the model ID is wrong, the error will indicate which ID was actually looked up. You can also check the harness logs or the agent configuration — the model ID is the string that uniquely identifies the running model (e.g. `mlx-community/MiniMax-M2.7-8bit`).
+
+**Registering your model in OpenFGA:**
+
+Before any authorization checks will succeed, grant the model permission to view at least one category:
+
+```bash
+./scripts/openfga-tuple.sh grant-view "mlx-community/MiniMax-M2.7-8bit" private_email
+```
+
+Without this tuple, the model will be unable to view any emails and all email PII will be masked in user prompts.
+
+---
+
+## Setting Your Recipient Identity
+
+The **recipient** is the entity that receives PII from the model — typically the harness or the user running the agent. The extension identifies the current recipient via `PRIVACY_FILTER_RECIPIENT_ID` and applies the output direction sharing checks only when `PRIVACY_FILTER_SHARING_ENABLED=true`.
+
+**Enable sharing checks:**
+```bash
+export PRIVACY_FILTER_SHARING_ENABLED=true
+export PRIVACY_FILTER_RECIPIENT_ID=recipient:harness
+```
+
+**Recipient ID format:** The ID must be a `recipient:` type object in OpenFGA (e.g. `recipient:harness`, `recipient:user:alice`). The harness itself is a valid recipient — using `recipient:harness` is the simplest default.
+
+**Setting up tuples for a recipient:**
+
+Before the model can share PII to the harness, two tuples must exist:
+
+```bash
+# 1. Grant the harness permission to view a specific PII instance (by hash)
+#    This allows the harness to receive this specific PII occurrence.
+#    The hash is derived from the literal by the extension at runtime.
+./scripts/openfga-tuple.sh grant-view-to-recipient "sha256-abc123" "recipient:harness"
+
+# 2. Establish trust: the harness trusts this model (so the model is allowed to send PII to it)
+./scripts/openfga-tuple.sh grant-trust "recipient:harness" "mlx-community/MiniMax-M2.7-8bit"
+```
+
+> **Note:** `grant-view-to-recipient` currently only supports instance-level (per-hash) grants, not category-level recipient grants. To grant category-level view permission to a recipient, write the tuple directly via the OpenFGA API or SDK.
+
+Without both tuples, sharing checks will fail and PII will be masked in model output even if the model itself is authorized to share.
+
+**How `PRIVACY_FILTER_RECIPIENT_ID` is used:**
+
+At runtime, the extension passes this ID as the recipient in all four-step sharing checks:
+
+```
+check(model_instance:M,           can_share, pii_instance:P)
+check(pii_instance:P,             lineage,   model_instance:M)
+check(recipient:harness,          can_view,  pii_instance:P)   ← from PRIVACY_FILTER_RECIPIENT_ID
+check(recipient:harness,          can_receive_from, model_instance:M)  ← from PRIVACY_FILTER_RECIPIENT_ID
+```
 
 ---
 
@@ -176,8 +248,48 @@ check(recipient:alice, can_receive_from, model_instance:support-bot)
 
 | Variable | Description |
 |----------|-------------|
-| `PRIVACY_FILTER_RECIPIENT_ID` | Current recipient (e.g., `user:alice`) |
+| `PRIVACY_FILTER_RECIPIENT_ID` | Current recipient (e.g., `recipient:harness`) |
 | `PRIVACY_FILTER_SHARING_ENABLED` | Set to `true` to enable sharing checks |
+
+---
+
+## The `category` Relation
+
+Each `pii_instance` carries a `category` relation pointing to the PII category it belongs to:
+
+```
+pii_instance:sha256-abc123 --category--> category:private_email
+```
+
+This relation is set automatically by the extension when it computes the PII hash — it is derived from the entity type returned by the Privacy Filter model. The category link is used internally by OpenFGA for cross-type queries and is defined in the schema to support the `lineage` relation across type boundaries.
+
+You do not normally need to manage this tuple directly. The extension writes it as part of the PII instance write operation.
+
+---
+
+## Event Handlers and Message Flow
+
+The extension applies authorization checks at specific points in the pi-mono event pipeline. Each event corresponds to one of the two authorization directions:
+
+| pi-mono event | Direction | When it fires |
+|---|---|---|
+| `context` | Input | Before a prompt is sent to the model — applies `can_view` checks to detected PII |
+| `message_end` | Output | After the model produces a text response — primary sharing authorization check |
+| `tool_result` | Output | After a tool executes — applies sharing checks to tool output that goes directly to users or other agents |
+
+### Input Direction — `context` handler
+
+When a user prompt arrives, the `context` handler scans for PII and builds a **denied categories set** — the union of all categories and literals the model is not authorized to view. Any matching PII is masked before the prompt reaches the model.
+
+This is a **fail-closed** check: if OpenFGA is unreachable, all PII is masked.
+
+### Output Direction — `message_end` and `tool_result` handlers
+
+When the model produces output containing PII, both `message_end` and `tool_result` apply the same four-step sharing check. `message_end` is the primary handler for text responses. `tool_result` is a secondary handler for cases where tool output goes directly to a recipient outside the conversation context (e.g. a tool that writes to a file or sends a message externally).
+
+For a full analysis of why both are needed, see `docs/pii-check-directions-analysis.md`.
+
+Sharing checks are only active when `PRIVACY_FILTER_SHARING_ENABLED=true` and `PRIVACY_FILTER_RECIPIENT_ID` is set.
 
 ---
 
@@ -356,17 +468,17 @@ Model `support-bot` wants to share PII instance `sha256-abc123` to recipient `us
 ./scripts/openfga-tuple.sh set-lineage "sha256-abc123" "support-bot"
 
 # 3. Grant recipient view permission
-./scripts/openfga-tuple.sh grant-view-to-recipient "sha256-abc123" "user:alice"
+./scripts/openfga-tuple.sh grant-view-to-recipient "sha256-abc123" "recipient:alice"
 
 # 4. Establish trust
-./scripts/openfga-tuple.sh grant-trust "user:alice" "support-bot"
+./scripts/openfga-tuple.sh grant-trust "recipient:alice" "support-bot"
 ```
 
 ### Environment
 
 ```bash
 export PRIVACY_FILTER_SHARING_ENABLED=true
-export PRIVACY_FILTER_RECIPIENT_ID=user:alice
+export PRIVACY_FILTER_RECIPIENT_ID=recipient:alice
 ```
 
 ### What Happens
@@ -386,7 +498,7 @@ If any check fails → PII is masked.
 
 ## See Also
 
-- [Proposal: Reverse PII Sharing Authorization](./proposal-reverse-pii-sharing-authorization.md)
+- [Proposal: Reverse PII Sharing Authorization](./proposal-reverse-pii-sharing-authorization.md) — implemented and extended by the input/output direction model in this extension
+- [PII Check Directions Analysis](./pii-check-directions-analysis.md) — why both `context`, `message_end`, and `tool_result` are needed for full coverage
 - [OpenFGA Documentation](https://openfga.dev/docs)
 - [OpenFGA Modeling Getting Started](https://openfga.dev/docs/modeling/getting-started)
-- OpenFGA schema 1.1 specification
