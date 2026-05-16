@@ -1,27 +1,53 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# OpenFGA Tuple Management Script
+# OpenFGA Tuple Management Script (v2 - with lineage and sharing)
 # Grant or revoke model access to PII categories or specific literals.
 #
 # Usage:
-#   ./scripts/openfga-tuple.sh grant <model-id> <category|sha256-hash> [relation]
-#   ./scripts/openfga-tuple.sh revoke <model-id> <category|sha256-hash> [relation]
-#   ./scripts/openfga-tuple.sh list [model-id]
+#   # Viewing permissions (input direction)
+#   ./scripts/openfga-tuple.sh grant-view <model-id> <pii-hash|category>
+#   ./scripts/openfga-tuple.sh revoke-view <model-id> <pii-hash|category>
+#   
+#   # Sharing permissions (output direction)
+#   ./scripts/openfga-tuple.sh grant-share <model-id> <pii-hash>
+#   ./scripts/openfga-tuple.sh revoke-share <model-id> <pii-hash>
+#   
+#   # Lineage (PII originates from model)
+#   ./scripts/openfga-tuple.sh set-lineage <pii-hash> <model-id>
+#   ./scripts/openfga-tuple.sh remove-lineage <pii-hash> <model-id>
+#   
+#   # Recipient permissions
+#   ./scripts/openfga-tuple.sh grant-view-to-recipient <pii-hash> <recipient-id>
+#   ./scripts/openfga-tuple.sh revoke-view-from-recipient <pii-hash> <recipient-id>
+#   
+#   # Trust relationship
+#   ./scripts/openfga-tuple.sh grant-trust <recipient-id> <model-id>
+#   ./scripts/openfga-tuple.sh revoke-trust <recipient-id> <model-id>
+#   
+#   # Category definitions
+#   ./scripts/openfga-tuple.sh define-category <category> <model-id>
+#   ./scripts/openfga-tuple.sh undefine-category <category> <model-id>
+#   
+#   # Check commands
+#   ./scripts/openfga-tuple.sh check <subject> <relation> <object>
+#   ./scripts/openfga-tuple.sh list [filter-type] [filter-value]
 #
 # Examples:
-#   # Grant model access to all emails (category-level)
-#   ./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" email
+#   # Grant model access to a specific PII (by hash)
+#   ./scripts/openfga-tuple.sh grant-view "mlx-community/MiniMax-M2.7-8bit" "sha256-3f2e8d7c4b1a"
 #
-#   # Grant model access to a specific email (literal-level, hash provided)
-#   ./scripts/openfga-tuple.sh grant "mlx-community/MiniMax-M2.7-8bit" "sha256-3f2e8d7c4b1a"
+#   # Grant model sharing access to a PII instance
+#   ./scripts/openfga-tuple.sh grant-share "mlx-community/MiniMax-M2.7-8bit" "sha256-3f2e8d7c4b1a"
 #
-#   # Revoke model access to secrets
-#   ./scripts/openfga-tuple.sh revoke "mlx-community/MiniMax-M2.7-8bit" secret
+#   # Set lineage: this PII originated from scanning-bot
+#   ./scripts/openfga-tuple.sh set-lineage "sha256-3f2e8d7c4b1a" "scanning-bot"
 #
-#   # List all tuples (or filter by model)
-#   ./scripts/openfga-tuple.sh list
-#   ./scripts/openfga-tuple.sh list "mlx-community/MiniMax-M2.7-8bit"
+#   # Allow alice to view this PII
+#   ./scripts/openfga-tuple.sh grant-view-to-recipient "sha256-3f2e8d7c4b1a" "user:alice"
+#
+#   # Alice trusts outputs from scanning-bot
+#   ./scripts/openfga-tuple.sh grant-trust "user:alice" "scanning-bot"
 #
 
 set -e
@@ -43,17 +69,35 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_action() { echo -e "${CYAN}[ACTION]${NC} $1"; }
 
 usage() {
-    echo "Usage: $0 <grant|revoke|list> [args]"
+    echo "Usage: $0 <command> [args]"
     echo ""
-    echo "Commands:"
-    echo "  grant <model-id> <category|sha256-hash> [relation]"
-    echo "          Grant a model permission to view a PII category or specific literal"
-    echo "  revoke <model-id> <category|sha256-hash> [relation]"
-    echo "          Revoke a model's permission to view a PII category or specific literal"
-    echo "  check <model-id> <category|sha256-hash> [relation]"
-    echo "          Check if a model has a specific relation to a PII category or literal"
-    echo "  list [model-id]"
-    echo "          List all tuples (optionally filtered by model)"
+    echo "Viewing permissions (input direction):"
+    echo "  grant-view <model-id> <pii-hash|category>"
+    echo "  revoke-view <model-id> <pii-hash|category>"
+    echo ""
+    echo "Sharing permissions (output direction):"
+    echo "  grant-share <model-id> <pii-hash>"
+    echo "  revoke-share <model-id> <pii-hash>"
+    echo ""
+    echo "Lineage (PII originates from model):"
+    echo "  set-lineage <pii-hash> <model-id>"
+    echo "  remove-lineage <pii-hash> <model-id>"
+    echo ""
+    echo "Recipient permissions:"
+    echo "  grant-view-to-recipient <pii-hash> <recipient-id>"
+    echo "  revoke-view-from-recipient <pii-hash> <recipient-id>"
+    echo ""
+    echo "Trust relationship:"
+    echo "  grant-trust <recipient-id> <model-id>"
+    echo "  revoke-trust <recipient-id> <model-id>"
+    echo ""
+    echo "Category definitions:"
+    echo "  define-category <category> <model-id>"
+    echo "  undefine-category <category> <model-id>"
+    echo ""
+    echo "Check and list:"
+    echo "  check <subject> <relation> <object>"
+    echo "  list [filter-type] [filter-value]"
     echo ""
     echo "Environment Variables:"
     echo "  OPENFGA_API_URL  (default: http://localhost:28080)"
@@ -77,102 +121,244 @@ check_openfga() {
     fi
 }
 
-# Build the object ID from the input
-# If input starts with "sha256-", use it directly
-# Otherwise, prefix with "privacy_category:"
+# Build object ID based on input type
 build_object_id() {
     local input="$1"
-    if [[ "${input}" == sha256-* ]]; then
-        echo "privacy_category:${input}"
-    else
-        echo "privacy_category:${input}"
-    fi
+    local type="${2:-auto}"  # auto, pii_instance, category, recipient, model_instance
+    
+    case "${type}" in
+        pii_instance)
+            if [[ "${input}" == pii_instance:* ]]; then
+                echo "${input}"
+            else
+                echo "pii_instance:${input}"
+            fi
+            ;;
+        category)
+            if [[ "${input}" == category:* ]]; then
+                echo "${input}"
+            else
+                echo "category:${input}"
+            fi
+            ;;
+        recipient)
+            if [[ "${input}" == recipient:* ]]; then
+                echo "${input}"
+            else
+                echo "recipient:${input}"
+            fi
+            ;;
+        model_instance)
+            if [[ "${input}" == model_instance:* ]]; then
+                echo "${input}"
+            else
+                echo "model_instance:${input}"
+            fi
+            ;;
+        auto|*)
+            # Auto-detect from prefix
+            if [[ "${input}" == pii_instance:* ]]; then
+                echo "${input}"
+            elif [[ "${input}" == category:* ]]; then
+                echo "${input}"
+            elif [[ "${input}" == recipient:* ]]; then
+                echo "${input}"
+            elif [[ "${input}" == model_instance:* ]]; then
+                echo "${input}"
+            elif [[ "${input}" == sha256-* ]]; then
+                echo "pii_instance:${input}"
+            else
+                echo "category:${input}"
+            fi
+            ;;
+    esac
 }
 
-# Grant access
-grant() {
-    local model_id="$1"
-    local target="$2"
-    local relation="${3:-can_view}"
+# Build subject ID
+build_subject_id() {
+    local input="$1"
+    local type="${2:-auto}"
+    
+    build_object_id "${input}" "${type}"
+}
+
+# Generic write tuple
+write_tuple() {
+    local subject="$1"
+    local subject_type="$2"
+    local relation="$3"
+    local object="$4"
+    local object_type="$5"
+    
+    local subject_id
     local object_id
-    object_id=$(build_object_id "${target}")
-
-    log_action "Granting ${model_id} ${relation} on ${object_id}"
-
-    local body="{\"writes\":{\"tuple_keys\":[{\"user\":\"model_instance:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
-
+    
+    subject_id=$(build_subject_id "${subject}" "${subject_type}")
+    object_id=$(build_object_id "${object}" "${object_type}")
+    
+    log_action "Writing: ${subject_id} --${relation}--> ${object_id}"
+    
+    local body="{\"writes\":{\"tuple_keys\":[{\"user\":\"${subject_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
+    
     local response
     if response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/write" \
         -H "Content-Type: application/json" \
         ${MODEL_ID:+-H "Authorization: Bearer ${OPENFGA_API_TOKEN:-}"} \
         -d "${body}"); then
-        log_info "Access granted successfully"
+        log_info "Tuple written successfully"
     else
-        log_error "Failed to grant access: ${response}"
+        log_error "Failed to write tuple: ${response}"
         exit 1
     fi
 }
 
-# Revoke access
-revoke() {
-    local model_id="$1"
-    local target="$2"
-    local relation="${3:-can_view}"
+# Generic delete tuple
+delete_tuple() {
+    local subject="$1"
+    local subject_type="$2"
+    local relation="$3"
+    local object="$4"
+    local object_type="$5"
+    
+    local subject_id
     local object_id
-    object_id=$(build_object_id "${target}")
-
-    log_action "Revoking ${model_id} ${relation} on ${object_id}"
-
-    local body="{\"deletes\":{\"tuple_keys\":[{\"user\":\"model_instance:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
-
+    
+    subject_id=$(build_subject_id "${subject}" "${subject_type}")
+    object_id=$(build_object_id "${object}" "${object_type}")
+    
+    log_action "Deleting: ${subject_id} --${relation}--> ${object_id}"
+    
+    local body="{\"deletes\":{\"tuple_keys\":[{\"user\":\"${subject_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}]}}"
+    
     local response
     if response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/write" \
         -H "Content-Type: application/json" \
         ${MODEL_ID:+-H "Authorization: Bearer ${OPENFGA_API_TOKEN:-}"} \
         -d "${body}"); then
-        log_info "Access revoked successfully"
+        log_info "Tuple deleted successfully"
     else
-        log_error "Failed to revoke access: ${response}"
+        log_error "Failed to delete tuple: ${response}"
         exit 1
     fi
 }
 
-# List tuples
-list_tuples() {
-    local model_filter="$1"
-    local url="${OPENFGA_API_URL}/stores/${STORE_ID}/read"
-
-    if [ -n "${model_filter}" ]; then
-        url="${url}?user=model_instance:${model_filter}"
-    fi
-
-    log_action "Fetching tuples from ${url}"
-
-    local response
-    response=$(curl -sf -X POST "${url}" \
-        -H "Content-Type: application/json" \
-        ${MODEL_ID:+-H "Authorization: Bearer ${OPENFGA_API_TOKEN:-}"})
-
-    if [ -z "${response}" ]; then
-        log_warn "No tuples found or error fetching tuples"
-        return
-    fi
-
-    echo "${response}" | python3 -m json.tool 2>/dev/null || echo "${response}"
+# Grant viewing permission (model --can_view--> pii_instance or category)
+grant_view() {
+    local model_id="$1"
+    local target="$2"
+    
+    write_tuple "${model_id}" "model_instance" "can_view" "${target}" "auto"
 }
 
-# Check if a tuple exists
+# Revoke viewing permission
+revoke_view() {
+    local model_id="$1"
+    local target="$2"
+    
+    delete_tuple "${model_id}" "model_instance" "can_view" "${target}" "auto"
+}
+
+# Grant sharing permission (model --can_share--> pii_instance)
+grant_share() {
+    local model_id="$1"
+    local pii_hash="$2"
+    
+    write_tuple "${model_id}" "model_instance" "can_share" "${pii_hash}" "pii_instance"
+}
+
+# Revoke sharing permission
+revoke_share() {
+    local model_id="$1"
+    local pii_hash="$2"
+    
+    delete_tuple "${model_id}" "model_instance" "can_share" "${pii_hash}" "pii_instance"
+}
+
+# Set lineage (pii_instance --lineage--> model_instance)
+# Note: lineage is defined on both pii_instance and model_instance types
+# to support cross-type checks. OpenFGA may reverse the tuple direction.
+set_lineage() {
+    local pii_hash="$1"
+    local model_id="$2"
+    
+    write_tuple "${pii_hash}" "pii_instance" "lineage" "${model_id}" "model_instance"
+}
+
+# Remove lineage
+remove_lineage() {
+    local pii_hash="$1"
+    local model_id="$2"
+    
+    delete_tuple "${pii_hash}" "pii_instance" "lineage" "${model_id}" "model_instance"
+}
+
+# Grant recipient view permission (recipient --can_view--> pii_instance)
+# Note: can_view is on recipient type with pii_instance as allowed user type
+grant_view_to_recipient() {
+    local pii_hash="$1"
+    local recipient_id="$2"
+    
+    write_tuple "${recipient_id}" "recipient" "can_view" "${pii_hash}" "pii_instance"
+}
+
+# Revoke recipient view permission
+revoke_view_from_recipient() {
+    local pii_hash="$1"
+    local recipient_id="$2"
+    
+    delete_tuple "${recipient_id}" "recipient" "can_view" "${pii_hash}" "pii_instance"
+}
+
+# Grant trust (recipient --can_receive_from--> model_instance)
+grant_trust() {
+    local recipient_id="$1"
+    local model_id="$2"
+    
+    write_tuple "${recipient_id}" "recipient" "can_receive_from" "${model_id}" "model_instance"
+}
+
+# Revoke trust
+revoke_trust() {
+    local recipient_id="$1"
+    local model_id="$2"
+    
+    delete_tuple "${recipient_id}" "recipient" "can_receive_from" "${model_id}" "model_instance"
+}
+
+# Define category (category --defines--> model_instance)
+define_category() {
+    local category="$1"
+    local model_id="$2"
+    
+    write_tuple "${category}" "category" "defines" "${model_id}" "model_instance"
+}
+
+# Undefine category
+undefine_category() {
+    local category="$1"
+    local model_id="$2"
+    
+    delete_tuple "${category}" "category" "defines" "${model_id}" "model_instance"
+}
+
+# Check a tuple
 check_tuple() {
-    local model_id="$1"
-    local target="$2"
-    local relation="${3:-can_view}"
+    local subject="$1"
+    local subject_type="$2"
+    local relation="$3"
+    local object="$4"
+    local object_type="$5"
+    
+    local subject_id
     local object_id
-    object_id=$(build_object_id "${target}")
-
-    log_action "Checking ${model_id} ${relation} on ${object_id}"
-
-    local body="{\"tuple_key\":{\"user\":\"model_instance:${model_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}}"
-
+    
+    subject_id=$(build_subject_id "${subject}" "${subject_type}")
+    object_id=$(build_object_id "${object}" "${object_type}")
+    
+    log_action "Checking: ${subject_id} --${relation}--> ${object_id}"
+    
+    local body="{\"tuple_key\":{\"user\":\"${subject_id}\",\"relation\":\"${relation}\",\"object\":\"${object_id}\"}}"
+    
     local response
     if response=$(curl -sf -X POST "${OPENFGA_API_URL}/stores/${STORE_ID}/check" \
         -H "Content-Type: application/json" \
@@ -181,10 +367,10 @@ check_tuple() {
         local allowed
         allowed=$(echo "${response}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('allowed', False))" 2>/dev/null || echo "false")
         if [ "${allowed}" = "True" ] || [ "${allowed}" = "true" ]; then
-            log_info "Tuple exists: ALLOWED"
+            log_info "ALLOWED"
             return 0
         else
-            log_warn "Tuple does not exist: DENIED"
+            log_warn "DENIED"
             return 1
         fi
     else
@@ -193,48 +379,186 @@ check_tuple() {
     fi
 }
 
+# List tuples
+list_tuples() {
+    local filter_type="$1"  # all, model, pii, recipient, category
+    local filter_value="$2"
+    
+    local url="${OPENFGA_API_URL}/stores/${STORE_ID}/read"
+    
+    case "${filter_type}" in
+        model)
+            url="${url}?user=model_instance:${filter_value}"
+            ;;
+        pii)
+            url="${url}?object=pii_instance:${filter_value}"
+            ;;
+        recipient)
+            url="${url}?object=recipient:${filter_value}"
+            ;;
+        category)
+            url="${url}?object=category:${filter_value}"
+            ;;
+        *)
+            # List all
+            ;;
+    esac
+    
+    log_action "Fetching tuples from ${url}"
+    
+    local response
+    response=$(curl -sf -X GET "${url}" \
+        -H "Content-Type: application/json" \
+        ${MODEL_ID:+-H "Authorization: Bearer ${OPENFGA_API_TOKEN:-}"} \
+        -H "Accept: application/json")
+    
+    if [ -z "${response}" ]; then
+        log_warn "No tuples found or error fetching tuples"
+        return
+    fi
+    
+    echo "${response}" | python3 -m json.tool 2>/dev/null || echo "${response}"
+}
+
 main() {
     if [ $# -lt 1 ]; then
         usage
     fi
-
+    
     check_openfga
-
+    
     local command="$1"
     shift
-
+    
     case "${command}" in
-        grant)
+        # Viewing commands
+        grant-view)
             if [ $# -lt 2 ]; then
-                log_error "grant requires <model-id> and <category|sha256-hash>"
+                log_error "grant-view requires <model-id> and <pii-hash|category>"
                 usage
             fi
             check_config
-            grant "$1" "$2" "${3:-can_view}"
+            grant_view "$1" "$2"
             ;;
-        revoke)
+        revoke-view)
             if [ $# -lt 2 ]; then
-                log_error "revoke requires <model-id> and <category|sha256-hash>"
+                log_error "revoke-view requires <model-id> and <pii-hash|category>"
                 usage
             fi
             check_config
-            revoke "$1" "$2" "${3:-can_view}"
+            revoke_view "$1" "$2"
             ;;
+        
+        # Sharing commands
+        grant-share)
+            if [ $# -lt 2 ]; then
+                log_error "grant-share requires <model-id> and <pii-hash>"
+                usage
+            fi
+            check_config
+            grant_share "$1" "$2"
+            ;;
+        revoke-share)
+            if [ $# -lt 2 ]; then
+                log_error "revoke-share requires <model-id> and <pii-hash>"
+                usage
+            fi
+            check_config
+            revoke_share "$1" "$2"
+            ;;
+        
+        # Lineage commands
+        set-lineage)
+            if [ $# -lt 2 ]; then
+                log_error "set-lineage requires <pii-hash> and <model-id>"
+                usage
+            fi
+            check_config
+            set_lineage "$1" "$2"
+            ;;
+        remove-lineage)
+            if [ $# -lt 2 ]; then
+                log_error "remove-lineage requires <pii-hash> and <model-id>"
+                usage
+            fi
+            check_config
+            remove_lineage "$1" "$2"
+            ;;
+        
+        # Recipient commands
+        grant-view-to-recipient)
+            if [ $# -lt 2 ]; then
+                log_error "grant-view-to-recipient requires <pii-hash> and <recipient-id>"
+                usage
+            fi
+            check_config
+            grant_view_to_recipient "$1" "$2"
+            ;;
+        revoke-view-from-recipient)
+            if [ $# -lt 2 ]; then
+                log_error "revoke-view-from-recipient requires <pii-hash> and <recipient-id>"
+                usage
+            fi
+            check_config
+            revoke_view_from_recipient "$1" "$2"
+            ;;
+        
+        # Trust commands
+        grant-trust)
+            if [ $# -lt 2 ]; then
+                log_error "grant-trust requires <recipient-id> and <model-id>"
+                usage
+            fi
+            check_config
+            grant_trust "$1" "$2"
+            ;;
+        revoke-trust)
+            if [ $# -lt 2 ]; then
+                log_error "revoke-trust requires <recipient-id> and <model-id>"
+                usage
+            fi
+            check_config
+            revoke_trust "$1" "$2"
+            ;;
+        
+        # Category commands
+        define-category)
+            if [ $# -lt 2 ]; then
+                log_error "define-category requires <category> and <model-id>"
+                usage
+            fi
+            check_config
+            define_category "$1" "$2"
+            ;;
+        undefine-category)
+            if [ $# -lt 2 ]; then
+                log_error "undefine-category requires <category> and <model-id>"
+                usage
+            fi
+            check_config
+            undefine_category "$1" "$2"
+            ;;
+        
+        # Check command
         check)
-            if [ $# -lt 2 ]; then
-                log_error "check requires <model-id> and <category|sha256-hash>"
+            if [ $# -lt 3 ]; then
+                log_error "check requires <subject>, <relation>, and <object>"
                 usage
             fi
             check_config
-            check_tuple "$1" "$2" "${3:-can_view}"
+            check_tuple "$1" "auto" "$2" "$3" "auto"
             ;;
+        
+        # List command
         list)
             check_config
-            list_tuples "$1"
+            list_tuples "$1" "$2"
             ;;
+        
         help|--help|-h)
             usage
             ;;
+        
         *)
             log_error "Unknown command: ${command}"
             usage

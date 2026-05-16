@@ -600,49 +600,189 @@ function makeMockCommandCtx() {
 ## 5. Implementation Checklist
 
 ### Phase 1: Test Infrastructure
-- [ ] Create `test/support/` directory
-- [ ] Write `mock-pi.ts` — fake `ExtensionAPI` with event bus, renderer registry, command registry, notification recording
-- [ ] Write `mock-classifier.ts` — fake `pipeline()` factory returning configurable `MockEntity[][]`
-- [ ] Write `mock-openfga.ts` — fake OpenFGA client with per-key result map
-- [ ] Write `ts-loader.mjs` — strip-types loader + `@huggingface/transformers` shim
-- [ ] Write `register-loader.mjs`
-- [ ] Create `test/integration/pii-extension.test.ts` (empty describe block, imports wired)
+- [x] Create `test/support/` directory
+- [x] Write `fetch-mock.ts` — intercepts global `fetch` calls for OpenFGA client testing
+- [x] Write `mock-openfga-client.ts` — fake OpenFGA client with per-key result map and call recording
+- [x] Write `mock-pipeline.ts` — fake HuggingFace pipeline factory returning configurable results
+- [x] Write `mock-pi-tui.ts` — fake TUI components
+- [x] Write `pi-extension-shim.ts` — fake ExtensionContext with registration tracking
+- [x] Write `register-loader.mjs` — loader for TypeScript test execution
+- [x] Create `test/integration/pii-extension.test.ts` (now `test/index-integration.test.ts`)
 
 ### Phase 2: Activation Tests
-- [ ] Test `piExtension(pi)` does not throw
-- [ ] Test `pii-alert` renderer is registered
-- [ ] Test `/check-pii` command is registered with non-empty description
-- [ ] Test `session_start` notification is sent
+- [x] Test `piExtension(pi)` does not throw
+- [x] Test `pii-alert` renderer is registered
+- [x] Test `/check-pii` command is registered with non-empty description
+- [x] Test `session_start` notification is sent
+- [x] Test `/check-pii-auth` command is registered
+- [x] Test `/check-pii-access` command is registered
 
 ### Phase 3: Message Renderer Tests
-- [ ] Test renderer with valid JSON — output contains "PII DETECTED" and entity types
-- [ ] Test renderer in `expanded: true` mode — includes sanitization hint
-- [ ] Test renderer with invalid JSON — returns a Text/Component (does not throw)
+- [x] Test renderer with valid JSON — output contains "PII DETECTED" and entity types
+- [x] Test renderer in `expanded: true` mode — includes sanitization hint
+- [x] Test renderer with invalid JSON — returns a Text/Component (does not throw)
 
 ### Phase 4: `/check-pii` Command Tests
-- [ ] Test with zero detections — "No PII detected" notification
-- [ ] Test with detections — sends `pii-alert` custom message with correct types
-- [ ] Test with empty/missing args — notifies usage hint
+- [x] Test with zero detections — "No PII detected" notification
+- [x] Test with detections — sends `pii-alert` custom message with correct types
+- [x] Test with empty/missing args — notifies usage hint
+- [x] Test `/check-pii-auth` with allowed/denied category scenarios
+- [x] Test `/check-pii-access` with direct OpenFGA check results
 
 ### Phase 5: `before_agent_start` Hook Tests
-- [ ] Test clean text passes through unchanged and sends no message
-- [ ] Test PII detected + denied category → masked in prompt + alert sent
-- [ ] Test PII detected + allowed category → preserved in prompt + alert includes ALLOWED
-- [ ] Test empty/whitespace prompt → skipped (no classifier call)
-- [ ] Test model ID from `ctx.model` used as OpenFGA subject
-- [ ] Test OpenFGA unreachable → fail-closed (all PII masked)
-- [ ] Test system prompt injection includes PRIVACY NOTICE text
+- [x] Test clean text passes through unchanged and sends no message
+- [x] Test PII detected + denied category → masked in prompt + alert sent
+- [x] Test PII detected + allowed category → preserved in prompt + alert includes ALLOWED
+- [x] Test empty/whitespace prompt → skipped (no classifier call)
+- [x] Test model ID from `ctx.model` used as OpenFGA subject
+- [x] Test OpenFGA unreachable → fail-closed (all PII masked)
+- [x] Test system prompt injection includes PRIVACY NOTICE text
+- [x] Test when `ctx.model?.id` is absent → all PII masked (fail-closed)
+- [x] Test inline pii-alert message with correct MASKED/ALLOWED per entity
 
 ### Phase 6: `context` Hook Tests
-- [ ] Test `pii-alert` custom messages are filtered out
-- [ ] Test user message PII is masked
-- [ ] Test assistant messages are NOT masked (only user role processed)
-- [ ] Test multi-message conversation preserves non-user messages
+- [x] Test `pii-alert` custom messages are filtered out
+- [x] Test user message PII is masked
+- [x] Test assistant messages are NOT masked (only user role processed)
+- [x] Test multi-message conversation preserves non-user messages
+- [x] Test OpenFGA category-level access allows PII in context
 
 ### Phase 7: OpenFGA Authorization Tests
-- [ ] Test category-allowed → literal preserved
-- [ ] Test category-denied + literal-allowed → literal preserved
-- [ ] Test category-denied + literal-not-configured → category-denied (fail-closed)
+- [x] Test category-allowed → literal preserved
+- [x] Test category-denied + literal-allowed → literal preserved
+- [x] Test category-denied + literal-not-configured → category-denied (fail-closed)
+- [x] Test fail-closed on first category-level check throw
+- [x] Test fail-closed mid-batch after some category checks succeed
+- [x] Test only categories that fail BOTH category-level AND all literal checks are denied
+- [x] Test exactly one category-level check per unique category (not per entity)
+
+### Phase 8: Sharing Authorization (Output Direction)
+- [x] Test `message_end` handler — returns early for non-assistant messages
+- [x] Test `message_end` handler — returns early when sharing is disabled
+- [x] Test `message_end` handler — returns early when no recipient is configured
+- [x] Test `message_end` handler — returns early when no PII detected
+- [x] Test `message_end` handler — returns unmodified message when sharing is allowed
+- [x] Test `message_end` handler — returns masked message when sharing is denied
+- [x] Test `tool_result` handler — output direction checks for tool-generated PII
+- [x] Test `buildSharingDeniedCategoriesSet()` — all sharing checks pass → empty set
+- [x] Test `buildSharingDeniedCategoriesSet()` — any check fails → category denied
+- [x] Test `buildSharingDeniedCategoriesSet()` — records shareCalls for each entity
+- [x] Test `buildSharingDeniedCategoriesSet()` — fail-closed when healthCheck fails
+- [x] Test `checkSharingAuthorization()` — returns correct allowed/checks result
+- [x] Test `isSharingEnabled()` — returns true only when env var is "true"
+- [x] Test `getRecipientId()` — returns env var value or empty string
+
+### Phase 9: OpenFGA Client Tests
+- [x] `OpenFGAClient.check()` — correct user/object format, auth header, error handling
+- [x] `OpenFGAClient.checkShare()` — 4-way check, early termination, fail-closed
+- [x] `OpenFGAClient.writeTuples()` — hashing, category prefix, batch writes
+- [x] `OpenFGAClient.readTuples()` — filter params, query string construction
+- [x] `OpenFGAClient.deleteTuples()` — hashing, deletes key format
+- [x] `OpenFGAClient.healthCheck()` — /healthz endpoint, network error handling
+
+### Phase 10: Integration Tests (Real OpenFGA)
+- [x] `openfga-integration.test.ts` — real API tests (requires `OPENFGA_INTEGRATION_TEST=true`)
+- [x] Complete 4-way sharing authorization flow test
+- [x] Category defines model_instance check
+- [x] Denied without tuple check
+
+---
+
+## 5b. Proposed Tests for Failures and Invalid Tuple Combinations
+
+### Tuple Format/Construction Failures
+- [x] Write tuple with invalid object type (neither pii_instance, category, nor recipient prefix)
+- [x] Write tuple with malformed SHA256 hash (not 40 hex chars)
+- [x] Write tuple with empty subject
+- [x] Write tuple with empty relation
+- [x] Write tuple with special characters in subject that break OpenFGA parsing
+- [x] Write tuple with unicode in subject/relation/object
+- [x] Check with subject exceeding maximum length
+- [x] Check with object that has no matching type in schema
+- [x] buildPIIInstanceId with 40-char hex string correctly prefixes as pii_instance
+- [x] buildPIIInstanceId with sha256- prefix correctly formats
+- [x] buildPIIInstanceId with category-like string (email) returns category prefix
+- [x] buildRecipientId with recipient: prefix returns as-is
+- [x] buildRecipientId without prefix adds recipient: prefix
+- [x] buildModelInstanceId with model_instance: prefix returns as-is
+- [x] buildModelInstanceId without prefix adds model_instance: prefix
+
+### Cross-Type Tuple Reversal Issues
+- [x] can_share check sends correct direction: model_instance#can_share@pii_instance
+- [x] lineage check is called when can_share passes
+- [x] verifies all 4 check directions are called correctly
+- [x] trust check is called when checkRecipientTrust is true and all previous checks pass
+- [x] auto-prefixes piiInstance with pii_instance: when sha256- only is provided
+- [x] auto-prefixes recipient with recipient: when just user:alice is provided
+- [x] can_view check direction is pii_instance#can_view@recipient
+
+### Authorization Failures (4-Way Check Components)
+- [x] returns allowed=false when model has no can_share tuple
+- [x] returns allowed=false when lineage is invalid (lineage check fails)
+- [x] returns allowed=false when lineage points to different model
+- [x] returns allowed=false when recipient has no can_view tuple
+- [x] returns allowed=false when recipient has no trust tuple (checkRecipientTrust=true)
+- [x] early termination after can_share failure
+- [x] early termination after lineage failure
+- [x] returns modelCanShare=true but lineageValid=false when lineage check fails
+- [x] different model has can_share for same PII does not grant sharing to original model
+- [x] PII lineage points to itself returns false for actual model sharing
+- [x] checkShare without checkRecipientTrust omits recipientTrusts field
+
+### Fail-Closed Scenarios
+- [x] fail-closes when OpenFGA server unreachable (network error)
+- [x] fail-closes when OpenFGA returns 500 Internal Server Error
+- [x] fail-closes when OpenFGA returns 404 Not Found (store doesn't exist)
+- [x] fail-closes when OpenFGA returns malformed JSON
+- [x] fail-closes when OpenFGA returns missing allowed field
+- [x] fail-closes when request times out
+- [x] fail-closes check() when OpenFGA is unreachable
+- [x] fail-closes writeTuples() when OpenFGA returns error
+- [x] healthCheck returns false on network error (does not throw)
+- [x] healthCheck returns false on non-2xx response (does not throw)
+
+### Authorization Model Schema Violations
+- [x] check with non-existent relation returns false (OpenFGA schema violation)
+- [x] check with object type not in model returns false or error
+- [x] write tuple with relation not defined on subject type may throw
+- [x] using deprecated originates_from relation name is handled
+- [x] check with subject type not in directly_related_user_types returns false
+
+### Batch Check Failure Modes
+- [x] batchCheckShare fail-closes when batch check throws
+- [x] batchCheckShare fail-closes when batch check returns non-2xx
+- [x] batchCheckShare with mixed object types sends all with can_share relation
+- [x] batchCheckShare returns Map with piiInstance keys
+
+### Tuple Delete/Read Failures
+- [x] deleteTuples of non-existent tuple does not throw (graceful handling)
+- [x] deleteTuples with wrong relation deletes correct tuple by user+object+relation
+- [x] readTuples with no matching filter returns empty array
+- [x] readTuples builds correct query params with all filters
+- [x] readTuples throws on non-2xx response
+- [x] deleteTuples throws on non-2xx response
+
+### Concurrency/Race Condition Scenarios
+- [x] concurrent writes to same tuple are independent (no locking)
+- [x] check immediately after write may return stale data (eventual consistency)
+- [x] delete during check in flight - check may succeed or fail (undefined behavior)
+
+### Edge Cases with Real Data
+- [x] PII with same hash from different contexts - lineage is per-model
+- [x] model shares PII it received from another model - lineage fails
+- [x] recipient that is also a model_instance (dual role) - check uses recipient role
+- [x] empty/whitespace-only PII literal still hashes correctly
+- [x] PII with newlines and control characters is preserved in hash
+- [x] hashLiteral produces different hashes for similar inputs
+- [x] hashLiteral is deterministic
+
+### Integration-Specific Failure Cases
+- [x] store ID doesn't exist returns error
+- [x] model ID (authorization model ID) doesn't exist returns error
+- [x] wrong API token returns 403 Forbidden
+- [x] write to read-only store returns 409 Conflict or similar
+- [x] read succeeds on read-only store
+- [x] invalid JSON in request body returns 400 Bad Request
 
 ## 6. What Cannot Be Tested Here
 

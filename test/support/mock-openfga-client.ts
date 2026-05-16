@@ -1,21 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Mock OpenFGA Client for testing buildDeniedCategoriesSet().
+ * Mock OpenFGA Client for testing buildDeniedCategoriesSet() and buildSharingDeniedCategoriesSet().
  *
- * Records all check() calls and returns configurable responses.
+ * Records all check() and checkShare() calls and returns configurable responses.
  * Use createMockOpenFGAClient() to instantiate, then configure
  * per-test via mock.checkResult() or mock.checkResultFn().
  */
 
-import type { CheckRequest } from '../../openfga.ts';
+import type { CheckRequest, ShareCheckRequest, ShareCheckResult } from '../../openfga.ts';
 
 export type RecordedCall = {
   subject: string;
   relation: string;
   object?: string;
   literal?: string;
-  /** The resolved object ID sent to OpenFGA (includes privacy_category: prefix) */
+  /** The resolved object ID sent to OpenFGA (includes pii_instance: or category: prefix) */
   resolvedObjectId: string;
+};
+
+export type RecordedShareCall = {
+  modelSubject: string;
+  piiInstance: string;
+  recipientId: string;
+  checkRecipientTrust?: boolean;
 };
 
 export type MockOpenFGAClient = {
@@ -43,14 +50,30 @@ export type MockOpenFGAClient = {
    */
   healthCheckResult(result: boolean): void;
 
+  /**
+   * Configure a fixed ShareCheckResult for ALL checkShare() calls.
+   */
+  shareCheckResult(result: ShareCheckResult): void;
+
+  /**
+   * Configure a per-call share check result function.
+   */
+  shareCheckResultFn(fn: (call: RecordedShareCall) => ShareCheckResult): void;
+
   /** Reset call history and configured behavior between tests. */
   reset(): void;
 
   /** All check() calls made since the last reset. */
   calls: RecordedCall[];
 
+  /** All checkShare() calls made since the last reset. */
+  shareCalls: RecordedShareCall[];
+
   /** The check() method implementing OpenFGAClient's interface. */
   check(request: CheckRequest): Promise<boolean>;
+
+  /** The checkShare() method implementing OpenFGAClient's interface. */
+  checkShare(request: ShareCheckRequest): Promise<ShareCheckResult>;
 
   /** The healthCheck() method implementing OpenFGAClient's interface. */
   healthCheck(): Promise<boolean>;
@@ -62,18 +85,24 @@ export function createMockOpenFGAClient(): MockOpenFGAClient {
   let error: Error | null = null;
   let healthResult: boolean = true; // default: healthy
   const calls: RecordedCall[] = [];
+  const shareCalls: RecordedShareCall[] = [];
+  let fixedShareResult: ShareCheckResult | null = null;
+  let shareResultFn: ((call: RecordedShareCall) => ShareCheckResult) | null = null;
 
   async function buildResolvedObjectId(request: CheckRequest): Promise<string> {
     if (request.literal) {
       // Mirrors OpenFGAClient.buildObjectId — hash the literal
       const { createHash } = await import('crypto');
       const hash = createHash('sha256').update(request.literal).digest('hex').substring(0, 40);
-      return `privacy_category:sha256-${hash}`;
+      return `pii_instance:sha256-${hash}`;
     }
     if (request.object?.startsWith('sha256-')) {
-      return `privacy_category:${request.object}`;
+      return `pii_instance:${request.object}`;
     }
-    return `privacy_category:${request.object}`;
+    if (request.object?.startsWith('pii_instance:')) {
+      return request.object;
+    }
+    return `category:${request.object}`;
   }
 
   async function check(request: CheckRequest): Promise<boolean> {
@@ -95,12 +124,33 @@ export function createMockOpenFGAClient(): MockOpenFGAClient {
     return false;
   }
 
+  async function checkShare(request: ShareCheckRequest): Promise<ShareCheckResult> {
+    shareCalls.push({
+      modelSubject: request.modelSubject,
+      piiInstance: request.piiInstance,
+      recipientId: request.recipientId,
+      checkRecipientTrust: request.checkRecipientTrust,
+    });
+
+    if (shareResultFn) return shareResultFn(shareCalls[shareCalls.length - 1]);
+    if (fixedShareResult !== null) return fixedShareResult;
+
+    // Default: deny everything
+    return {
+      allowed: false,
+      modelCanShare: false,
+      lineageValid: false,
+      recipientCanView: false,
+    };
+  }
+
   async function healthCheck(): Promise<boolean> {
     return healthResult;
   }
 
   return {
     check,
+    checkShare,
     healthCheck,
 
     checkResult(result: boolean) {
@@ -125,16 +175,33 @@ export function createMockOpenFGAClient(): MockOpenFGAClient {
       healthResult = result;
     },
 
+    shareCheckResult(result: ShareCheckResult) {
+      fixedShareResult = result;
+      shareResultFn = null;
+    },
+
+    shareCheckResultFn(fn: (call: RecordedShareCall) => ShareCheckResult) {
+      shareResultFn = fn;
+      fixedShareResult = null;
+    },
+
     reset() {
       calls.length = 0;
+      shareCalls.length = 0;
       fixedResult = null;
       resultFn = null;
       error = null;
       healthResult = true;
+      fixedShareResult = null;
+      shareResultFn = null;
     },
 
     get calls() {
       return calls;
+    },
+
+    get shareCalls() {
+      return shareCalls;
     },
   };
 }
